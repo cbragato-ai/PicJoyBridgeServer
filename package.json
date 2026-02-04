@@ -1,0 +1,25 @@
+{
+    "name": "ws-bridge-server",
+    "version": "1.0.0",
+    "main": "dist/index.js",
+    "scripts": {
+        "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+        "build": "tsc -p .",
+        "start": "node dist/index.js"
+    },
+    "dependencies": {
+        "@types/uuid": "^11.0.0",
+        "express": "^4.18.0",
+        "jsonwebtoken": "^9.0.0",
+        "sqlite3": "^5.1.7",
+        "uuid": "^13.0.0",
+        "ws": "^8.0.0"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.0",
+        "@types/jsonwebtoken": "^9.0.0",
+        "@types/ws": "^8.5.0",
+        "ts-node-dev": "^2.0.0",
+        "typescript": "^5.0.0"
+    }
+}

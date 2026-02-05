@@ -72,6 +72,18 @@ class DataSource {
       callback(err, row);
     });
   }
+
+  clearExpiredSessions() {
+    const deleteQuery = `
+        DELETE FROM sessao WHERE expires_on < ?;`;
+    this.db.run(deleteQuery, [Date.now()], (err) => {
+      if (err) {
+        console.error("Error clearing expired sessions:", err);
+      } else {
+        console.log("Expired sessions cleared.");
+      }
+    });
+  }
 }
 
 export { DataSource };

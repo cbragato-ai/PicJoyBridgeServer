@@ -1,14 +1,36 @@
 import express, { response } from "express";
 import http from "http";
+import cors from "cors";
 import { WebSocketServer } from "ws";
 import { handleMessage, cleanup } from "./wsBridge";
 import { DataSource } from "./database/sqlite";
+import { msUntilNextMidnight } from "./util/msUntilNextMidnight";
 
 const app = express();
 app.use(express.json());
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+app.options("*", cors()); // Permite pré-flight para todas as rotas
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 const datasource = new DataSource();
+
+// Clear expired sessions every day at midnight
+console.info(
+  `Scheduling daily expired session cleanup, to ${msUntilNextMidnight()}ms from now.`
+);
+setTimeout(() => {
+  datasource.clearExpiredSessions();
+  setInterval(() => {
+    datasource.clearExpiredSessions();
+  }, 24 * 60 * 60 * 1000);
+}, msUntilNextMidnight());
 
 // upgrade http protocol to WebSocket protocol
 server.on("upgrade", (request, socket, head) => {

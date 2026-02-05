@@ -96,6 +96,7 @@ app.post("/session/:code", (request, response) => {
                 console.error("Error creating session:", err);
                 response.status(500).json({ error: "Internal server error" });
               } else {
+                console.log("Session created:", row);
                 response
                   .status(201)
                   .json({ message: "Session created", session: row });

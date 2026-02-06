@@ -27,7 +27,9 @@ export function handleMessage(ws: WebSocket, message: any) {
         clients.add(info);
         console.info("WS Client Registered", info);
 
-        ws.send(JSON.stringify({ type: "registered", sessionId }));
+        ws.send(
+          JSON.stringify({ type: "registered", role: info.type, sessionId })
+        );
 
         if (info.type === "kiosk" && info.sessionId) {
           for (const c of clients) {

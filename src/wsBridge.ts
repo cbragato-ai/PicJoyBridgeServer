@@ -14,6 +14,10 @@ export function register(ws: WebSocket, rawMsg: any) {}
 
 export function handleMessage(ws: WebSocket, message: any) {
   switch (message.type) {
+    case "healtcheck":
+      {
+      }
+      break;
     case "register":
       {
         const tokenData = verifyToken(message.token || "");

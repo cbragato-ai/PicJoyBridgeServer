@@ -4,7 +4,7 @@ import cors from "cors";
 import { WebSocketServer } from "ws";
 import { handleMessage, cleanup } from "./wsBridge";
 import { DataSource } from "./database/sqlite";
-import { msUntilNextMidnight } from "./util/msUntilNextMidnight";
+import { msUntilNextMidnight } from "./util/MsUntilNextMidnight";
 
 const app = express();
 app.use(express.json());

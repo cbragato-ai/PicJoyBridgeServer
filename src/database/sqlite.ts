@@ -36,6 +36,29 @@ class DataSource {
         console.log("Table created or already exists.");
       }
     });
+
+    const createTableHealtchekingLog = `
+      CREATE TABLE IF NOT EXISTS healtchecking_log (
+        id TEXT PRIMARY_KEY,
+        code TEXT NOT NULL CHECK(length(code) = 6),
+        status_log_csv TEXT,
+        last_update INTEGER NOT NULL, 
+        record_active INTEGER NOT NULL DEFAULT 1 CHECK(record_active IN (0,1)),
+        created_at INTEGER_NOT_NULL
+      )
+
+      -- garante apenas 1 registro ativo por code
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_healthchecking_active
+      ON healthchecking_log(code)
+      WHERE record_active = 1;
+
+      -- index para performance em updates
+      CREATE INDEX IF NOT EXISTS idx_healthchecking_code
+      ON healthchecking_log(code);
+
+      CREATE INDEX IF NOT EXISTS idx_healthchecking_active_lookup
+      ON healthchecking_log(record_active);
+    `;
   }
 
   addSession(
@@ -81,6 +104,34 @@ class DataSource {
         console.error("Error clearing expired sessions:", err);
       } else {
         console.log("Expired sessions cleared.");
+      }
+    });
+  }
+
+  healtcheckDeactivateActualLog(code: string) {
+    const query = `UPDATE healtchecking_log SET record_active = 0, last_update=? WHERE code = ? AND record_active=1`;
+    this.db.run(query, [Date.now(), code], (error) => {
+      if (error) {
+        console.error("Erro for deactivate log of last hour", error);
+      } else {
+        console.log("Deactivated log of last hour!");
+      }
+    });
+  }
+
+  healtcheckNewLog(code: string, csvItem: string) {
+    const query = `
+      INSERT INTO 
+        healtchecking_log ( id, code, status_log_csv, last_update, created_at, record_active )
+      VALUES 
+        ( ?, ?, ?, ?, ?, 1 );
+    `;
+    const id = uuid();
+    this.db.run(query, [id, code, csvItem, Date.now(), Date.now()], (error) => {
+      if (error) {
+        console.error("Erro for add new log for next hour", error);
+      } else {
+        console.log("Created new log for next hour!");
       }
     });
   }

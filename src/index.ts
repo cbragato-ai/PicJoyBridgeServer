@@ -72,7 +72,7 @@ app.get("/", (request, response) => response.json({ ok: true }));
 
 app.post("/session/:code", (request, response) => {
   try {
-    const code = request.params.code;
+    const code = request.params.code.toUpperCase();
     console.log("body", request.body);
     const session = datasource.getSessionByCode(code, (err, row) => {
       if (err) {
@@ -112,6 +112,8 @@ app.post("/session/:code", (request, response) => {
   }
 });
 
+
+
 app.get("/session/:code", (request, response) => {
   const code = request.params.code.toUpperCase();
   console.log(code);
@@ -122,11 +124,15 @@ app.get("/session/:code", (request, response) => {
       response.status(500).json({ error: "Internal server error" });
     } else {
       if (row) {
+        if(row.in_use==0){
+          datasource.updateSession(row.id,true);
+        }
         response.json({
           id: row.id,
           code: row.code,
           bridgeServerAddress: row.bridge_server_address,
           expiresOn: row.expires_on,
+          inUse: row.in_use==1,
         });
       } else {
         response
@@ -136,6 +142,23 @@ app.get("/session/:code", (request, response) => {
     }
   });
 });
+
+app.put("/session/:code",(request,response)=>{
+  const code = request.params.code.toUpperCase();
+  console.log(code);
+  datasource.getSessionByCode(code,(err,row)=>{
+    if(err){
+      console.error("Error retrieving session:", err);
+      response.status(500).json({ error: "Internal server error" });
+    }else{
+      if(row){
+        datasource.updateSession(row.id,false);
+      }
+    }
+  })
+})
+
+
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => console.log(`Bridge running on ${port}`));

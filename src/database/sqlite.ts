@@ -24,6 +24,7 @@ class DataSource {
             id TEXT PRIMARY KEY,                 -- UUID como string
             code TEXT NOT NULL CHECK(length(code) = 6),
             bridge_server_address TEXT NOT NULL,
+            in_use INTEGER NOT NULL DEFAULT 0 CHECK(in_use IN (0,1)),
             expires_on INTEGER NOT NULL           -- timestamp (Unix time)
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sessao_code ON sessao(code);
@@ -84,6 +85,18 @@ class DataSource {
     );
     this.getSessionByCode(code, callback);
   }
+
+  updateSession(id:string, setInUse:boolean){
+    const updateQuery = "UPDATE sessao SET in_use=? WHERE id=?";
+    this.db.run(updateQuery, [setInUse,id],(err)=>{
+      if(err){
+        console.error("Error update session:", err);
+      }else{
+        console.log("Session updated correctly");
+      }
+    })
+  }
+
 
   getSessionByCode(
     code: string,

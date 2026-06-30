@@ -114,7 +114,9 @@ app.post("/session/:code", (request, response) => {
 
 app.get("/session/:code", (request, response) => {
   const code = request.params.code;
+  console.log(code);
   datasource.getSessionByCode(code, (err, row) => {
+    console.log(row);
     if (err) {
       console.error("Error retrieving session:", err);
       response.status(500).json({ error: "Internal server error" });

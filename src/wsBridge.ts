@@ -8,9 +8,10 @@ export type ClientInfo = {
   id?: string; // client id
 };
 
+const sessionLocks = new Map<string, string>();
 const clients = new Set<ClientInfo>();
 
-export function register(ws: WebSocket, rawMsg: any) {}
+export function register(ws: WebSocket, rawMsg: any) { }
 
 export function handleMessage(ws: WebSocket, message: any) {
   switch (message.type) {
@@ -28,6 +29,26 @@ export function handleMessage(ws: WebSocket, message: any) {
           sessionId,
           id: message.id,
         };
+
+        if (info.type === "web" && info.sessionId) {
+
+          const currentLock = sessionLocks.get(info.sessionId);
+
+          if (currentLock && currentLock !== info.id) {
+
+            ws.send(JSON.stringify({
+              type: "session-locked",
+              sessionId: info.sessionId
+            }));
+
+            ws.close();
+
+            return;
+          }
+
+          sessionLocks.set(info.sessionId, info.id || "");
+        }
+
         clients.add(info);
         console.info("WS Client Registered", info);
 
@@ -126,6 +147,11 @@ export function handleMessage(ws: WebSocket, message: any) {
 
 export function cleanup(ws: WebSocket) {
   for (const c of Array.from(clients)) {
-    if (c.ws === ws) clients.delete(c);
+    if (c.ws === ws){ 
+      if (c.type === "web" && c.sessionId) {
+        sessionLocks.delete(c.sessionId);
+      }
+      clients.delete(c);
+    }
   }
 }

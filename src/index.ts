@@ -113,7 +113,7 @@ app.post("/session/:code", (request, response) => {
 });
 
 app.get("/session/:code", (request, response) => {
-  const code = request.params.code;
+  const code = request.params.code.toUpperCase();
   console.log(code);
   datasource.getSessionByCode(code, (err, row) => {
     console.log(row);

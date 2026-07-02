@@ -127,6 +127,7 @@ class DataSource {
       if (err) {
         console.error("Error retrieving sessions:", err);
       } else {
+        console.log("Retrieved sessions:", rows);
         return rows;
       }
     });

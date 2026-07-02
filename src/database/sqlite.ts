@@ -25,6 +25,7 @@ class DataSource {
             code TEXT NOT NULL CHECK(length(code) = 6),
             bridge_server_address TEXT NOT NULL,
             in_use INTEGER NOT NULL DEFAULT 0 CHECK(in_use IN (0,1)),
+            customer_id TEXT,
             expires_on INTEGER NOT NULL           -- timestamp (Unix time)
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sessao_code ON sessao(code);
@@ -86,9 +87,9 @@ class DataSource {
     this.getSessionByCode(code, callback);
   }
 
-  updateSession(id:string, setInUse:boolean){
-    const updateQuery = "UPDATE sessao SET in_use=? WHERE id=?";
-    this.db.run(updateQuery, [setInUse?1:0,id],(err)=>{
+  updateSession(id:string, setInUse:boolean, customerId?:string){
+    const updateQuery = "UPDATE sessao SET in_use=? customer_id=? WHERE id=?";
+    this.db.run(updateQuery, [setInUse?1:0, customerId, id],(err)=>{
       if(err){
         console.error("Error update session:", err);
       }else{
@@ -102,8 +103,7 @@ class DataSource {
     code: string,
     callback?: (err: Error | null, row?: any) => void
   ) {
-    const selectQuery = `
-        SELECT * FROM sessao WHERE code = ? and expires_on > ?;`;
+    const selectQuery = `SELECT * FROM sessao WHERE code = ? and expires_on > ? ;`;
     this.db.get(selectQuery, [code, Date.now()], (err, row) => {
       callback?.(err, row);
     });

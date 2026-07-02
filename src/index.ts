@@ -118,8 +118,9 @@ app.post("/session/:code", (request, response) => {
 
 
 
-app.get("/session/:code", (request, response) => {
+app.get("/session/:code/:customerId", (request, response) => {
   const code = request.params.code.toUpperCase();
+  const customerId = request.params.customerId;
   console.log(code);
   datasource.getSessionByCode(code, (err, row) => {
     console.log(row);
@@ -129,7 +130,7 @@ app.get("/session/:code", (request, response) => {
     } else {
       if (row) {
         if(row.in_use==0){
-          datasource.updateSession(row.id,true);
+          datasource.updateSession(row.id,true,customerId);
         }
         response.json({
           id: row.id,
@@ -137,6 +138,7 @@ app.get("/session/:code", (request, response) => {
           bridgeServerAddress: row.bridge_server_address,
           expiresOn: row.expires_on,
           inUse: row.in_use==1,
+          customerId: row.customer_id,
         });
       } else {
         response

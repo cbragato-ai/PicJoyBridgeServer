@@ -88,7 +88,7 @@ class DataSource {
   }
 
   updateSession(id:string, setInUse:boolean, customerId?:string){
-    const updateQuery = "UPDATE sessao SET in_use=? customer_id=? WHERE id=?";
+    const updateQuery = "UPDATE sessao SET in_use=?, customer_id=? WHERE id=?";
     this.db.run(updateQuery, [setInUse?1:0, customerId, id],(err)=>{
       if(err){
         console.error("Error update session:", err);

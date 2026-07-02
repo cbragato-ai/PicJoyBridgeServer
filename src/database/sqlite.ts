@@ -121,17 +121,6 @@ class DataSource {
     });
   }
 
-  healtcheckDeactivateActualLog(code: string) {
-    const query = `UPDATE healtchecking_log SET record_active = 0, last_update=? WHERE code = ? AND record_active=1`;
-    this.db.run(query, [Date.now(), code], (error) => {
-      if (error) {
-        console.error("Erro for deactivate log of last hour", error);
-      } else {
-        console.log("Deactivated log of last hour!");
-      }
-    });
-  }
-
   getSessions() {
     const selectQuery = `SELECT * FROM sessao WHERE expires_on > ?;`;
     this.db.all(selectQuery, [Date.now()], (err, rows) => {
@@ -139,6 +128,17 @@ class DataSource {
         console.error("Error retrieving sessions:", err);
       } else {
         return rows;
+      }
+    });
+  }
+
+  healtcheckDeactivateActualLog(code: string) {
+    const query = `UPDATE healtchecking_log SET record_active = 0, last_update=? WHERE code = ? AND record_active=1`;
+    this.db.run(query, [Date.now(), code], (error) => {
+      if (error) {
+        console.error("Erro for deactivate log of last hour", error);
+      } else {
+        console.log("Deactivated log of last hour!");
       }
     });
   }

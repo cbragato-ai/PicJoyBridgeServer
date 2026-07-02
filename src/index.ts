@@ -69,6 +69,10 @@ wss.on("connection", (ws) => {
 
 app.get("/health", (request, response) => response.json({ ok: true }));
 app.get("/", (request, response) => response.json({ ok: true }));
+app.get("/sessions", (request, response) => {
+  const sessions = datasource.getSessions();
+  response.json(sessions);
+});
 
 app.post("/session/:code", (request, response) => {
   try {
@@ -158,10 +162,6 @@ app.put("/session/:code",(request,response)=>{
   })
 })
 
-app.get("/sessions", (request, response) => {
-  const sessions = datasource.getSessions();
-  response.json(sessions);
-});
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => console.log(`Bridge running on ${port}`));

@@ -158,6 +158,10 @@ app.put("/session/:code",(request,response)=>{
   })
 })
 
+app.get("/sessions", (request, response) => {
+  const sessions = datasource.getSessions();
+  response.json(sessions);
+});
 
 
 const port = Number(process.env.PORT || 3000);

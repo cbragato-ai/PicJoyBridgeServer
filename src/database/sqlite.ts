@@ -88,7 +88,7 @@ class DataSource {
 
   updateSession(id:string, setInUse:boolean){
     const updateQuery = "UPDATE sessao SET in_use=? WHERE id=?";
-    this.db.run(updateQuery, [setInUse,id],(err)=>{
+    this.db.run(updateQuery, [setInUse?1:0,id],(err)=>{
       if(err){
         console.error("Error update session:", err);
       }else{
@@ -128,6 +128,17 @@ class DataSource {
         console.error("Erro for deactivate log of last hour", error);
       } else {
         console.log("Deactivated log of last hour!");
+      }
+    });
+  }
+
+  getSessions() {
+    const selectQuery = `SELECT * FROM sessao WHERE expires_on > ?;`;
+    this.db.all(selectQuery, [Date.now()], (err, rows) => {
+      if (err) {
+        console.error("Error retrieving sessions:", err);
+      } else {
+        return rows;
       }
     });
   }

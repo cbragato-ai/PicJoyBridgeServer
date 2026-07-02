@@ -163,6 +163,5 @@ app.get("/sessions", (request, response) => {
   response.json(sessions);
 });
 
-
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => console.log(`Bridge running on ${port}`));

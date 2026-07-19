@@ -2,7 +2,7 @@ import express, { response } from "express";
 import http from "http";
 import cors from "cors";
 import { WebSocketServer } from "ws";
-import { handleMessage, cleanup } from "./wsBridge";
+import { handleMessage, cleanup, sendToKiosk } from "./wsBridge";
 import { DataSource } from "./database/sqlite";
 import { msUntilNextMidnight } from "./util/MsUntilNextMidnight";
 
@@ -14,7 +14,7 @@ app.use(
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
-  })
+  }),
 );
 app.options("*", cors()); // Permite pré-flight para todas as rotas
 const server = http.createServer(app);
@@ -23,13 +23,16 @@ const datasource = new DataSource();
 
 // Clear expired sessions every day at midnight
 console.info(
-  `Scheduling daily expired session cleanup, to ${msUntilNextMidnight()}ms from now.`
+  `Scheduling daily expired session cleanup, to ${msUntilNextMidnight()}ms from now.`,
 );
 setTimeout(() => {
   datasource.clearExpiredSessions();
-  setInterval(() => {
-    datasource.clearExpiredSessions();
-  }, 24 * 60 * 60 * 1000);
+  setInterval(
+    () => {
+      datasource.clearExpiredSessions();
+    },
+    24 * 60 * 60 * 1000,
+  );
 }, msUntilNextMidnight());
 
 // upgrade http protocol to WebSocket protocol
@@ -45,7 +48,6 @@ wss.on("connection", (ws) => {
     try {
       let text: string;
 
-      // 🔥 Preserva exatamente o conteúdo recebido
       if (typeof raw === "string") {
         text = raw;
       } else if (raw instanceof ArrayBuffer) {
@@ -105,7 +107,7 @@ app.post("/session/:code", (request, response) => {
                   .status(201)
                   .json({ message: "Session created", session: row });
               }
-            }
+            },
           );
         }
       }
@@ -115,8 +117,6 @@ app.post("/session/:code", (request, response) => {
     response.status(500).json({ error: "Internal server error" });
   }
 });
-
-
 
 app.get("/session/:code/:customerId", (request, response) => {
   const code = request.params.code.toUpperCase();
@@ -129,15 +129,15 @@ app.get("/session/:code/:customerId", (request, response) => {
       response.status(500).json({ error: "Internal server error" });
     } else {
       if (row) {
-        if(row.in_use==0){
-          datasource.updateSession(row.id,true,customerId);
+        if (row.in_use == 0) {
+          datasource.updateSession(row.id, true, customerId);
         }
         response.json({
           id: row.id,
           code: row.code,
           bridgeServerAddress: row.bridge_server_address,
           expiresOn: row.expires_on,
-          inUse: row.in_use==1,
+          inUse: row.in_use == 1,
           customerId: row.customer_id,
         });
       } else {
@@ -149,21 +149,58 @@ app.get("/session/:code/:customerId", (request, response) => {
   });
 });
 
-app.put("/session/:code",(request,response)=>{
+app.put("/session/:code", (request, response) => {
   const code = request.params.code.toUpperCase();
   console.log(code);
-  datasource.getSessionByCode(code,(err,row)=>{
-    if(err){
+  datasource.getSessionByCode(code, (err, row) => {
+    if (err) {
       console.error("Error retrieving session:", err);
       response.status(500).json({ error: "Internal server error" });
-    }else{
-      if(row){
-        datasource.updateSession(row.id,false);
+    } else {
+      if (row) {
+        datasource.updateSession(row.id, false);
       }
     }
-  })
-})
+  });
+});
 
+app.post("/command/:code/:command", (request, response) => {
+  const code = request.params.code.toUpperCase();
+  const command = request.params.command;
+
+  datasource.getSessionByCode(code, (err, row) => {
+    if (err) {
+      console.error(err);
+      return response.status(500).json({
+        error: "Internal server error",
+      });
+    }
+
+    if (!row) {
+      return response.status(404).json({
+        error: "Session not found",
+      });
+    }
+
+    const sent = sendToKiosk(row.code, {
+      type: "command",
+      command,
+      payload: request.body,
+    });
+
+    if (!sent) {
+      return response.status(404).json({
+        error: "Kiosk is not connected",
+      });
+    }
+
+    response.json({
+      success: true,
+      command,
+      session: row.code,
+    });
+  });
+});
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => console.log(`Bridge running on ${port}`));

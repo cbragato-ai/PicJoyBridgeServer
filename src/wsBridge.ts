@@ -11,7 +11,7 @@ export type ClientInfo = {
 const sessionLocks = new Map<string, string>();
 const clients = new Set<ClientInfo>();
 
-export function register(ws: WebSocket, rawMsg: any) { }
+export function register(ws: WebSocket, rawMsg: any) {}
 
 export function handleMessage(ws: WebSocket, message: any) {
   switch (message.type) {
@@ -31,15 +31,15 @@ export function handleMessage(ws: WebSocket, message: any) {
         };
 
         if (info.type === "web" && info.sessionId) {
-
           const currentLock = sessionLocks.get(info.sessionId);
 
           if (currentLock && currentLock !== info.id) {
-
-            ws.send(JSON.stringify({
-              type: "session-locked",
-              sessionId: info.sessionId
-            }));
+            ws.send(
+              JSON.stringify({
+                type: "session-locked",
+                sessionId: info.sessionId,
+              }),
+            );
 
             ws.close();
 
@@ -53,7 +53,7 @@ export function handleMessage(ws: WebSocket, message: any) {
         console.info("WS Client Registered", info);
 
         ws.send(
-          JSON.stringify({ type: "registered", role: info.type, sessionId })
+          JSON.stringify({ type: "registered", role: info.type, sessionId }),
         );
 
         if (info.type === "kiosk" && info.sessionId) {
@@ -68,7 +68,7 @@ export function handleMessage(ws: WebSocket, message: any) {
                   type: "device-status",
                   sessionId: info.sessionId,
                   status: "online",
-                })
+                }),
               );
             }
           }
@@ -147,11 +147,28 @@ export function handleMessage(ws: WebSocket, message: any) {
 
 export function cleanup(ws: WebSocket) {
   for (const c of Array.from(clients)) {
-    if (c.ws === ws){ 
+    if (c.ws === ws) {
       if (c.type === "web" && c.sessionId) {
         sessionLocks.delete(c.sessionId);
       }
       clients.delete(c);
     }
   }
+}
+
+export function sendToKiosk(sessionId: string, message: any): boolean {
+  let sent = false;
+
+  for (const client of clients) {
+    if (
+      client.type === "kiosk" &&
+      client.sessionId === sessionId &&
+      client.ws.readyState === client.ws.OPEN
+    ) {
+      client.ws.send(JSON.stringify(message));
+      sent = true;
+    }
+  }
+
+  return sent;
 }

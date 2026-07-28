@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
 import { verifyToken } from "./auth";
+import { DataSource } from "./database/sqlite";
 
 export type ClientInfo = {
   ws: WebSocket;
@@ -10,6 +11,7 @@ export type ClientInfo = {
 
 const sessionLocks = new Map<string, string>();
 const clients = new Set<ClientInfo>();
+const datasource = new DataSource();
 
 export function register(ws: WebSocket, rawMsg: any) {}
 
@@ -24,6 +26,16 @@ export function handleMessage(ws: WebSocket, message: any) {
         const sessionId = message.sessionId;
         console.log("Unlock Kiosk Session", sessionId);
         sessionLocks.set(sessionId, "");
+        datasource.getSessionByCode(sessionId, (err, row) => {
+          if (err) {
+            console.error("Error retrieving session:", err);
+          } else {
+            if (row) {
+              console.log("Update database session to unlock", row.id);
+              datasource.updateSession(row.id, false);
+            }
+          }
+        });
       }
       break;
     case "register":

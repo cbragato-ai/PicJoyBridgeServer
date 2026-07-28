@@ -26,22 +26,19 @@ export function handleMessage(ws: WebSocket, message: any) {
         const sessionId: String = message.sessionId;
         console.log("Unlock Kiosk Session", sessionId);
         sessionLocks.set(sessionId.toString(), "");
-        datasource.getSessionByCodeToUnlock(
-          sessionId.toUpperCase(),
-          (err, row) => {
-            if (err) {
-              console.error("Error retrieving session:", err);
+        datasource.getSessionByCode(sessionId.toUpperCase(), (err, row) => {
+          if (err) {
+            console.error("Error retrieving session:", err);
+          } else {
+            console.log(`Session Row`, row);
+            if (row) {
+              console.log("Update database session to unlock", row.id);
+              datasource.updateSession(row.id, false);
             } else {
-              console.log(`Session Row`, row);
-              if (row) {
-                console.log("Update database session to unlock", row.id);
-                datasource.updateSession(row.id, false);
-              } else {
-                console.log(`Session not found for code ${sessionId}`);
-              }
+              console.log(`Session not found for code ${sessionId}`);
             }
-          },
-        );
+          }
+        });
       }
       break;
     case "register":

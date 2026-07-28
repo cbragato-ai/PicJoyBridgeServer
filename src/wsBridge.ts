@@ -21,8 +21,8 @@ export function handleMessage(ws: WebSocket, message: any) {
       break;
     case "unlock":
       {
-        const tokenData = verifyToken(message.token || "");
-        const sessionId = tokenData?.sessionId || message.sessionId;
+        console.log("Unlock Kiosk Session");
+        const sessionId = message.sessionId;
         sessionLocks.set(sessionId, "");
       }
       break;

@@ -67,7 +67,7 @@ class DataSource {
     code: string,
     bridgeServerAddress: string,
     expiresOn: number,
-    callback?: (err: Error | null, row?: any) => void
+    callback?: (err: Error | null, row?: any) => void,
   ) {
     const id = uuid();
     const insertQuery = `
@@ -82,26 +82,25 @@ class DataSource {
         } else {
           console.log("Session inserted successfully.");
         }
-      }
+      },
     );
     this.getSessionByCode(code, callback);
   }
 
-  updateSession(id:string, setInUse:boolean, customerId?:string){
+  updateSession(id: string, setInUse: boolean, customerId?: string) {
     const updateQuery = "UPDATE sessao SET in_use=?, customer_id=? WHERE id=?";
-    this.db.run(updateQuery, [setInUse?1:0, customerId, id],(err)=>{
-      if(err){
+    this.db.run(updateQuery, [setInUse ? 1 : 0, customerId, id], (err) => {
+      if (err) {
         console.error("Error update session:", err);
-      }else{
+      } else {
         console.log("Session updated correctly");
       }
-    })
+    });
   }
-
 
   getSessionByCode(
     code: string,
-    callback?: (err: Error | null, row?: any) => void
+    callback?: (err: Error | null, row?: any) => void,
   ) {
     const selectQuery = `SELECT * FROM sessao WHERE code = ? and expires_on > ? ;`;
     this.db.get(selectQuery, [code, Date.now()], (err, row) => {

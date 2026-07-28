@@ -79,13 +79,13 @@ app.get("/sessions", (request, response) => {
 app.post("/session/:code", (request, response) => {
   try {
     const code = request.params.code.toUpperCase();
-    console.log("body", request.body);
     const session = datasource.getSessionByCode(code, (err, row) => {
       if (err) {
         console.error("Error retrieving session:", err);
         response.status(500).json({ error: "Internal server error" });
       } else {
         if (row) {
+          console.log(`Return old session for ${code}`, row);
           response.json({
             id: row.id,
             code: row.code,
@@ -102,7 +102,7 @@ app.post("/session/:code", (request, response) => {
                 console.error("Error creating session:", err);
                 response.status(500).json({ error: "Internal server error" });
               } else {
-                console.log("Session created:", row);
+                console.log(`Created new Session for ${code}`, row);
                 response
                   .status(201)
                   .json({ message: "Session created", session: row });

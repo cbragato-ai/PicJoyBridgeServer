@@ -33,6 +33,8 @@ export function handleMessage(ws: WebSocket, message: any) {
             if (row) {
               console.log("Update database session to unlock", row.id);
               datasource.updateSession(row.id, false);
+            } else {
+              console.log(`Session not found for code ${sessionId}`);
             }
           }
         });

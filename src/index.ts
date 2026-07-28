@@ -121,9 +121,7 @@ app.post("/session/:code", (request, response) => {
 app.get("/session/:code/:customerId", (request, response) => {
   const code = request.params.code.toUpperCase();
   const customerId = request.params.customerId;
-  console.log(code);
   datasource.getSessionByCode(code, (err, row) => {
-    console.log(row);
     if (err) {
       console.error("Error retrieving session:", err);
       response.status(500).json({ error: "Internal server error" });

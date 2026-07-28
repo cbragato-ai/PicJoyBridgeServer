@@ -30,6 +30,7 @@ export function handleMessage(ws: WebSocket, message: any) {
           if (err) {
             console.error("Error retrieving session:", err);
           } else {
+            console.log(`Session Row`, row);
             if (row) {
               console.log("Update database session to unlock", row.id);
               datasource.updateSession(row.id, false);

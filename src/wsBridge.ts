@@ -26,7 +26,7 @@ export function handleMessage(ws: WebSocket, message: any) {
         const sessionId = message.sessionId;
         console.log("Unlock Kiosk Session", sessionId);
         sessionLocks.set(sessionId, "");
-        datasource.getSessionByCode(sessionId, (err, row) => {
+        datasource.getSessionByCodeToUnlock(sessionId, (err, row) => {
           if (err) {
             console.error("Error retrieving session:", err);
           } else {

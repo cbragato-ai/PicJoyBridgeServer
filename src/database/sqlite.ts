@@ -108,6 +108,16 @@ class DataSource {
     });
   }
 
+  getSessionByCodeToUnlock(
+    code: string,
+    callback?: (err: Error | null, row?: any) => void,
+  ) {
+    const selectQuery = `SELECT * FROM sessao WHERE code = ?;`;
+    this.db.get(selectQuery, [code], (err, row) => {
+      callback?.(err, row);
+    });
+  }
+
   clearExpiredSessions() {
     const deleteQuery = `
         DELETE FROM sessao WHERE expires_on < ?;`;

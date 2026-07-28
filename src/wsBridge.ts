@@ -19,6 +19,13 @@ export function handleMessage(ws: WebSocket, message: any) {
       {
       }
       break;
+    case "unlock":
+      {
+        const tokenData = verifyToken(message.token || "");
+        const sessionId = tokenData?.sessionId || message.sessionId;
+        sessionLocks.set(sessionId, "");
+      }
+      break;
     case "register":
       {
         const tokenData = verifyToken(message.token || "");

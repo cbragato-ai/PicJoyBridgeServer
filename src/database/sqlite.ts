@@ -42,7 +42,7 @@ class DataSource {
     const createTableHealtchekingLog = `
       CREATE TABLE IF NOT EXISTS healtchecking_log (
         id TEXT PRIMARY_KEY,
-        code TEXT NOT NULL CHECK(length(code) = 6),
+        code TEXT NOT NULL CHECK(length(code) = 8),
         status_log_csv TEXT,
         last_update INTEGER NOT NULL, 
         record_active INTEGER NOT NULL DEFAULT 1 CHECK(record_active IN (0,1)),

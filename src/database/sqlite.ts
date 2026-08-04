@@ -22,7 +22,7 @@ class DataSource {
     const createTableQuery = `
         CREATE TABLE IF NOT EXISTS sessao (
             id TEXT PRIMARY KEY,                 -- UUID como string
-            code TEXT NOT NULL CHECK(length(code) = 6),
+            code TEXT NOT NULL CHECK(length(code) = 8),
             bridge_server_address TEXT NOT NULL,
             in_use INTEGER NOT NULL DEFAULT 0 CHECK(in_use IN (0,1)),
             customer_id TEXT,

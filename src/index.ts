@@ -102,6 +102,13 @@ app.post("/session/:code", (request, response) => {
                 console.error("Error creating session:", err);
                 response.status(500).json({ error: "Internal server error" });
               } else {
+                if (!row) {
+                  console.error("Error creating session: No row returned");
+                  response
+                    .status(500)
+                    .json({ error: "Error creating session: No row returned" });
+                  return;
+                }
                 console.log(`Created new Session for ${code}`, row);
                 response
                   .status(201)

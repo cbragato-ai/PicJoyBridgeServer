@@ -2,8 +2,8 @@ import { randomBytes, createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import { CONFIRMED_PROTOCOL, FLOW_LIMITS, ConfirmedManifest, UploadRequest, UploadAck, requireUpload, validId } from "./confirmedProtocol";
 
-type Peer = { ws: WebSocket; role: "web" | "kiosk"; sessionId: string; id: string; ticket?: string; completed?: { ack: UploadAck; fingerprint: string } };
-type Permission = { ticket: string; kiosk: WebSocket; expiresAt: number; customerId?: string; used: boolean; revoked?: boolean };
+type Peer = { ws: WebSocket; role: "web" | "kiosk"; sessionId: string; id: string; ticket?: string; maxFiles?: number; completed?: { ack: UploadAck; fingerprint: string } };
+type Permission = { ticket: string; kiosk: WebSocket; expiresAt: number; customerId?: string; used: boolean; maxFiles: number; revoked?: boolean };
 type Transfer = { id: string; web: Peer; kiosk: Peer; manifest: ConfirmedManifest; next: number;
   pending?: { id: number; fingerprint: string; operation: string; bytes: number }; last?: { ack: UploadAck; fingerprint: string };
   startedAt: number; timer?: ReturnType<typeof setTimeout> };
@@ -21,6 +21,7 @@ export class ConfirmedTransfers {
   }
   constructor(private send: (ws: WebSocket, message: unknown) => boolean) {}
 
+  capacity(ws: WebSocket) { return this.peers.get(ws)?.maxFiles ?? 0; }
   hasKiosk(session: string) { return [...this.peers.values()].some(p => p.role === "kiosk" && p.sessionId === session); }
   claim(session: string, ticket: unknown, customer: string): boolean {
     const permission = this.permissions.get(session);
@@ -42,9 +43,9 @@ export class ConfirmedTransfers {
         permission.customerId === id, "Permissão inválida ou consumida. Releia o QR Code no totem.");
       permission.used = true;
     }
-    this.peers.set(ws, { ws, role, sessionId, id, ...(role === "web" ? { ticket: ticket as string } : {}) });
+    this.peers.set(ws, { ws, role, sessionId, id, ...(role === "web" ? { ticket: ticket as string, maxFiles: this.permissions.get(sessionId)!.maxFiles } : {}) });
   }
-  unlock(ws: WebSocket) {
+  unlock(ws: WebSocket, maxFiles: unknown = 0) {
     const peer = this.peers.get(ws);
     requireUpload(peer?.role === "kiosk", "Somente o totem pode abrir uma nova transferência.");
     this.abort(peer.sessionId, "SESSION_RESET", "O totem reiniciou a sessão.");
@@ -54,11 +55,12 @@ export class ConfirmedTransfers {
       this.send(web.ws, { type: "transfer-error", protocolVersion: 2, code: "SESSION_RESET", message: "O totem abriu uma nova sessão. Releia o QR Code." });
       web.ws.close(1008, "SESSION_RESET");
     }
-    const permission = { ticket: randomBytes(32).toString("hex"), kiosk: ws,
+    const capacity = typeof maxFiles === "number" && Number.isSafeInteger(maxFiles) && maxFiles >= 0 ? Math.min(100, maxFiles) : 0;
+    const permission = { maxFiles: capacity, ticket: randomBytes(32).toString("hex"), kiosk: ws,
       expiresAt: Date.now() + FLOW_LIMITS.permissionTimeoutMs, used: false };
     this.permissions.set(peer.sessionId, permission);
     this.send(ws, { type: "upload-permission", protocolVersion: CONFIRMED_PROTOCOL, uploadTicket: permission.ticket,
-      expiresAt: permission.expiresAt });
+      expiresAt: permission.expiresAt, maxFiles: capacity });
   }
   private revoke(session: string) { const permission = this.permissions.get(session); if (permission) { permission.used = true; permission.revoked = true; } }
   private remove(transfer: Transfer) {
@@ -113,7 +115,7 @@ export class ConfirmedTransfers {
           requireUpload(kiosk?.role === "kiosk" && kiosk.ws.readyState === kiosk.ws.OPEN, "Totem desconectado ou incompatível.");
           requireUpload(this.transfers.size < FLOW_LIMITS.maxTransfers &&
             (this.transfers.size + 1) * FLOW_LIMITS.frameBytes <= FLOW_LIMITS.globalWindowBytes, "Capacidade de envios atingida. Tente novamente junto ao totem.");
-          transfer = { id: request.transferId, web: peer, kiosk, manifest: new ConfirmedManifest(request.files),
+          transfer = { id: request.transferId, web: peer, kiosk, manifest: new ConfirmedManifest(request.files, peer.maxFiles ?? 0),
             next: 0, startedAt: Date.now() };
           this.transfers.set(peer.sessionId, transfer);
         }

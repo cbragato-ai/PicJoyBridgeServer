@@ -49,7 +49,7 @@ function register(api, socket, role, version = 1) {
   });
 }
 
-test('limites: aceita 100 fotos e recusa a 101ª, arquivo grande e tamanho adulterado', () => {
+test('limites: aceita 100 fotos e recusa a 101ª, arquivo vazio e tamanho adulterado', () => {
   const session = new protocol.UploadSession();
   for (let i = 0; i < 100; i++) {
     const name = `foto-${i}.jpg`;
@@ -58,7 +58,7 @@ test('limites: aceita 100 fotos e recusa a 101ª, arquivo grande e tamanho adult
   assert.throws(() => session.accept(meta('foto-101.jpg')), { code: 'UPLOAD_LIMIT_EXCEEDED' });
   session.finish();
   assert.throws(() => session.finish(), { code: 'INCOMPLETE_TRANSFER' });
-  assert.throws(() => new protocol.UploadSession().accept(meta('grande.jpg', 20 * 1024 * 1024 + 1)), { code: 'UPLOAD_LIMIT_EXCEEDED' });
+  assert.throws(() => new protocol.UploadSession().accept(meta('vazia.jpg', 0)), { code: 'INVALID_FILE' });
   assert.throws(() => new protocol.UploadSession().accept({ ...meta(), totalBase64Length: 8 }), { code: 'INVALID_FILE' });
 });
 
@@ -203,10 +203,10 @@ test('integração local: encaminha 100 fotos por sockets reais e informa rejei�
   assert.equal(server.address().port > 0, true);
 });
 
-function confirmedSession(api = bridge(), sessionId = 'TEST0001') {
+function confirmedSession(api = bridge(), sessionId = 'TEST0001', maxFiles = 100) {
   const kiosk = new Socket(), web = new Socket();
   api.handleMessage(kiosk, { type: 'register', role: 'kiosk', id: 'kiosk-' + sessionId, sessionId, protocolVersion: 2 });
-  api.handleMessage(kiosk, { type: 'unlock', sessionId });
+  api.handleMessage(kiosk, { type: 'unlock', maxFiles, sessionId });
   const ticket = kiosk.messages.findLast(message => message.type === 'upload-permission').uploadTicket;
   assert.equal(api.claimUploadPermission(sessionId, ticket, 'customer-' + sessionId), true);
   api.handleMessage(web, { type: 'register', role: 'web', id: 'customer-' + sessionId, sessionId, protocolVersion: 2, uploadTicket: ticket });
@@ -241,7 +241,7 @@ test('v2: replay de QR, troca de sessão, Kiosk duplicado e unlock pelo web são
   app.api.handleMessage(intruder, { type: 'register', role: 'web', id: 'intruder', sessionId: app.sessionId, protocolVersion: 2, uploadTicket: app.ticket });
   assert.equal(intruder.messages.at(-1).type, 'transfer-error');
   assert.equal(app.api.claimUploadPermission('OTHER001', app.ticket, 'intruder'), false);
-  app.api.handleMessage(app.web, { type: 'unlock', sessionId: app.sessionId }); assert.equal(app.web.messages.at(-1).type, 'transfer-error');
+  app.api.handleMessage(app.web, { type: 'unlock', maxFiles: 100, sessionId: app.sessionId }); assert.equal(app.web.messages.at(-1).type, 'transfer-error');
   const duplicate = new Socket(); app.api.handleMessage(duplicate, { type: 'register', role: 'kiosk', id: 'other', sessionId: app.sessionId, protocolVersion: 2 });
   assert.equal(duplicate.messages.at(-1).code, 'DUPLICATE_KIOSK'); app.api.cleanup(app.web); app.api.cleanup(app.kiosk);
 });
@@ -250,7 +250,7 @@ test('v2: nomes iguais são independentes; manifestos e repetições adulteradas
   validator.accept(v2request(1, 'chunk', v2chunk())); validator.accept(v2request(2, 'file-complete', { fileId: 'file-a' }));
   validator.accept(v2request(3, 'chunk', { ...v2chunk(), fileId: 'file-b' })); validator.accept(v2request(4, 'file-complete', { fileId: 'file-b' }));
   validator.accept(v2request(5, 'finish'));
-  for (const invalid of [[], [...v2files, ...v2files], [{ ...v2files[0], size: 20 * 1024 * 1024 + 1 }]]) assert.throws(() => new confirmedProtocol.ConfirmedManifest(invalid));
+  for (const invalid of [[], [...v2files, ...v2files], [{ ...v2files[0], size: 0 }]]) assert.throws(() => new confirmedProtocol.ConfirmedManifest(invalid));
   for (const invalid of [v2request(1, 'chunk', v2chunk()), v2request(0, 'start', { files: [{ ...v2files[0], size: 4 }] })]) {
     const app = confirmedSession(); app.api.handleMessage(app.web, v2request(0, 'start', { files: v2files })); app.api.handleMessage(app.web, invalid);
     assert.equal(app.web.messages.at(-1).type, 'transfer-error'); app.api.cleanup(app.web); app.api.cleanup(app.kiosk);
@@ -276,7 +276,7 @@ test('v2: deadline aborta as duas pontas e não reabre a permissão', () => {
   const timed = load('src/confirmedTransfers.ts', { ws: { WebSocket }, 'node:crypto': require('node:crypto'), './confirmedProtocol': confirmedProtocol },
     { setTimeout(callback, delay) { timers.push({ callback, delay }); return { unref() {} }; }, clearTimeout() {} });
   const manager = new timed.ConfirmedTransfers((socket, message) => { socket.send(JSON.stringify(message)); return true; });
-  const kiosk = new Socket(), web = new Socket(); manager.register(kiosk, 'kiosk', 'TIME0001', 'kiosk'); manager.unlock(kiosk);
+  const kiosk = new Socket(), web = new Socket(); manager.register(kiosk, 'kiosk', 'TIME0001', 'kiosk'); manager.unlock(kiosk, 100);
   const ticket = kiosk.messages.at(-1).uploadTicket; assert.equal(manager.claim('TIME0001', ticket, 'customer'), true);
   manager.register(web, 'web', 'TIME0001', 'customer', ticket); manager.handle(web, v2request(0, 'start', { files: v2files }));
   assert.equal(timers.at(-1).delay, 60000); timers.at(-1).callback();
@@ -301,7 +301,7 @@ test('v2 integração: 100 fotos em duas sessões, destino lento não bloqueia o
   const finished = [];
   async function transfer(sessionId, delay) {
     const kiosk = await connect('kiosk', sessionId);
-    const grant = message(kiosk, data => data.type === 'upload-permission'); kiosk.send(JSON.stringify({ type: 'unlock', sessionId }));
+    const grant = message(kiosk, data => data.type === 'upload-permission'); kiosk.send(JSON.stringify({ type: 'unlock', maxFiles: 100, sessionId }));
     const ticket = (await grant).uploadTicket; assert.equal(api.claimUploadPermission(sessionId, ticket, 'web-' + sessionId), true);
     const web = await connect('web', sessionId, ticket); let chunks = 0;
     kiosk.on('message', raw => { const request = JSON.parse(raw.toString()); if (request.type !== 'upload-request') return;
@@ -325,7 +325,7 @@ test('v2 integração: 100 fotos em duas sessões, destino lento não bloqueia o
 });
 
 test('v2: conexão antiga e seu cleanup não revogam o novo QR após reset do totem', () => {
-  const app = confirmedSession(); app.api.handleMessage(app.kiosk, { type: 'unlock', sessionId: app.sessionId });
+  const app = confirmedSession(); app.api.handleMessage(app.kiosk, { type: 'unlock', maxFiles: 100, sessionId: app.sessionId });
   const ticket = app.kiosk.messages.at(-1).uploadTicket; assert.notEqual(ticket, app.ticket);
   app.api.handleMessage(app.web, v2request(0, 'start', { files: v2files }));
   assert.equal(app.api.claimUploadPermission(app.sessionId, ticket, 'new-customer'), true);
@@ -339,7 +339,7 @@ test('v2: conexão antiga e seu cleanup não revogam o novo QR após reset do to
 test('HTTP: ticket inválido é recusado antes de alterar SQLite; dono autorizado recebe sua identidade', () => {
   const api = bridge(), kiosk = new Socket(), routes = new Map(), writes = [];
   api.handleMessage(kiosk, { type: 'register', role: 'kiosk', id: 'kiosk', sessionId: 'HTTP0001', protocolVersion: 2 });
-  api.handleMessage(kiosk, { type: 'unlock', sessionId: 'HTTP0001' }); const ticket = kiosk.messages.at(-1).uploadTicket;
+  api.handleMessage(kiosk, { type: 'unlock', maxFiles: 100, sessionId: 'HTTP0001' }); const ticket = kiosk.messages.at(-1).uploadTicket;
   const app = { use() {}, options() {}, get(path, handler) { routes.set(path, handler); }, post() {}, put() {} };
   const express = Object.assign(() => app, { json: () => () => {} });
   const server = Object.assign(new EventEmitter(), { listen(port, callback) { callback(); } });
@@ -362,8 +362,26 @@ test('v2: permissão expirada e mudança de versão no mesmo socket são recusad
   const timed = load('src/confirmedTransfers.ts', { ws: { WebSocket }, 'node:crypto': require('node:crypto'), './confirmedProtocol': confirmedProtocol },
     { setTimeout, clearTimeout, Date: class extends Date { static now() { return now; } } });
   const manager = new timed.ConfirmedTransfers((socket, message) => { socket.send(JSON.stringify(message)); return true; });
-  const kiosk = new Socket(); manager.register(kiosk, 'kiosk', 'TIME0001', 'kiosk'); manager.unlock(kiosk);
+  const kiosk = new Socket(); manager.register(kiosk, 'kiosk', 'TIME0001', 'kiosk'); manager.unlock(kiosk, 100);
   const ticket = kiosk.messages.at(-1).uploadTicket; now = 600001; assert.equal(manager.claim('TIME0001', ticket, 'customer'), false); manager.cleanup(kiosk);
   const app = confirmedSession(); app.api.handleMessage(app.web, { type: 'register', role: 'web', sessionId: app.sessionId, id: 'customer-' + app.sessionId, protocolVersion: 1 });
   assert.equal(app.web.messages.at(-1).code, 'INVALID_REGISTRATION'); app.api.cleanup(app.web); app.api.cleanup(app.kiosk);
+});
+
+test('saldo da permissão limita o manifesto mesmo com cliente adulterado', () => {
+  for (const available of [0, 1, 5, 99, 100, 500]) {
+    const app = confirmedSession(bridge(), 'TEST0001', available), expected = Math.min(100, available);
+    assert.equal(app.web.messages.at(-1).uploadLimits.maxFiles, expected);
+    assert.equal(app.web.messages.at(-1).printCapacity.maxFiles, expected);
+    const files = Array.from({ length: expected + 1 }, (_, i) => ({ ...v2files[0], fileId: 'f-' + i }));
+    app.api.handleMessage(app.web, v2request(0, 'start', { files }));
+    assert.equal(app.web.messages.at(-1).type, 'transfer-error');
+    assert.equal(app.kiosk.messages.some(message => message.operation === 'start'), false);
+    app.api.cleanup(app.web); app.api.cleanup(app.kiosk);
+  }
+});
+test('metadados acima dos antigos tetos de arquivo e lote são aceitos', () => {
+  const large = { ...v2files[0], size: 3 * 1024 * 1024 * 1024 };
+  assert.doesNotThrow(() => new confirmedProtocol.ConfirmedManifest([large]));
+  const legacy = new protocol.UploadSession(); assert.doesNotThrow(() => legacy.accept(meta('grande.jpg', large.size)));
 });

@@ -31,11 +31,11 @@ export function validateManifest(files: unknown): ManifestFile[] {
   for (const file of files) {
     requireUpload(file && validId(file.fileId) && !ids.has(file.fileId), "Identificador de foto inválido ou repetido.");
     requireUpload(typeof file.name === "string" && file.name.length > 0 && file.name.length <= 255, "Nome de foto inválido.");
-    requireUpload(Number.isSafeInteger(file.size) && file.size > 0 && file.size <= UPLOAD_LIMITS.maxFileBytes, "Cada foto deve ter até 20 MiB.");
+    requireUpload(Number.isSafeInteger(file.size) && file.size > 0 && file.size <= UPLOAD_LIMITS.maxFileBytes, "Tamanho de foto inválido.");
     requireUpload(typeof file.mime === "string" && file.mime.length <= 100 && file.mime.startsWith("image/"), "Tipo de foto inválido.");
     ids.add(file.fileId); bytes += file.size;
   }
-  requireUpload(bytes <= UPLOAD_LIMITS.maxTotalBytes, "O lote deve ter até 2 GiB.");
+  requireUpload(Number.isSafeInteger(bytes) && bytes <= UPLOAD_LIMITS.maxTotalBytes, "Tamanho total informado inválido.");
   return files.map(({ fileId, name, size, mime }) => ({ fileId, name, size, mime }));
 }
 
@@ -45,7 +45,10 @@ export class ConfirmedManifest {
   private index = 0;
   private seq = 0;
   private bytes = 0;
-  constructor(files: unknown) { this.files = validateManifest(files); }
+  constructor(files: unknown, maxFiles: number = UPLOAD_LIMITS.maxFiles) {
+    this.files = validateManifest(files);
+    requireUpload(this.files.length <= maxFiles, `O saldo da impressora permite até ${maxFiles} foto(s) neste envio.`);
+  }
   accept(request: UploadRequest) {
     if (request.operation === "finish") {
       requireUpload(this.index === this.files.length, "O lote ainda contém fotos incompletas."); return;

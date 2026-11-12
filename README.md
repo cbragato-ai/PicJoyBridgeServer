@@ -8,7 +8,7 @@ Bridge HTTP/WebSocket entre PicJoyUploader e PicJoyKioskApp.
 
 ## Contenção do upload — protocolo 1 (legado)
 
-O cliente pode enviar `protocolVersion: 1` no `register`. A resposta `registered` confirma a versão e informa `uploadLimits`: `maxFiles: 100`, `maxFileBytes: 20971520`, `maxTotalBytes: 2147483648`, `maxChunkChars: 65536`.
+O cliente pode enviar `protocolVersion: 1` no `register`. A resposta `registered` confirma a versão e informa `uploadLimits`: `maxFiles: 100`, `maxFileBytes: Number.MAX_SAFE_INTEGER`, `maxTotalBytes: Number.MAX_SAFE_INTEGER`, `maxChunkChars: 65536`. Os campos de bytes preservam precisão e compatibilidade; não existe teto comercial por MB.
 
 Para web registrado nessa versão, o Bridge contabiliza o lote por conexão, sem guardar conteúdo das fotos. Valida `file-meta` (`fileName`, `size`, `totalBase64Length`), `file-chunk` (`fileName`, `seq`, `chunkBase64`) e `file-complete`. Os nomes precisam ser únicos; sequências começam em zero e são contíguas. A finalização exige o tamanho Base64 declarado. `notify` com `message: 'transfer_complete'` exige todos os arquivos completos. Repetir o registro do mesmo socket não reinicia os contadores. Só uma nova conexão inicia outro lote; retomada e idempotência ficam para a etapa 2.
 
@@ -38,3 +38,11 @@ O registro do Kiosk e os endpoints administrativos preservam o modelo de autenti
 Publicar Bridge → Kiosk → Uploader, coordenando a troca dos clientes. Pares antigos continuam em v1; não são admitidos sobre um Kiosk v2. O uploader novo exige ACKs e não faz downgrade silencioso. Reverter somente o Bridge é incompatível com os clientes v2.
 
 Contrato detalhado: `PicJoyKioskApp/api-documentation.md`. Resultados da etapa 2: `PicJoyKioskApp/docs/analisis/2026-11-12-etapa-2-entrega-confirmada.md`. A memória de todas as representações das imagens no Kiosk continua sendo tratada na etapa 3.
+
+## Quantidade vinculada ao saldo
+
+O Kiosk envia `maxFiles` em `unlock` depois de consultar a impressora. O Bridge fixa esse teto na geração da permissão e anuncia `printCapacity.maxFiles` e `uploadLimits.maxFiles` no registro web. Dado ausente/inválido resulta em zero; valor acima de 100 é limitado a 100. Manifesto acima desse teto é recusado antes do encaminhamento.
+
+Foram removidos os tetos de 20 MiB por foto e 2 GiB por lote. Tamanhos devem ser inteiros positivos e o total precisa ser representável com exatidão. Permanecem os limites por frame/janela, validação dos bytes efetivamente recebidos e timeouts. Isso não homologa a memória do Kiosk para arquivos arbitrariamente grandes: a etapa 3 continua necessária.
+
+Atualizar os três componentes de forma coordenada: o uploader novo exige confirmação explícita do saldo, e um Kiosk antigo sem `maxFiles` não recebe permissão para enviar fotos no servidor atualizado.

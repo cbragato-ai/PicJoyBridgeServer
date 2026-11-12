@@ -2,8 +2,8 @@ export const UPLOAD_PROTOCOL_VERSION = 1;
 
 export const UPLOAD_LIMITS = {
   maxFiles: 100,
-  maxFileBytes: 20 * 1024 * 1024,
-  maxTotalBytes: 2 * 1024 * 1024 * 1024,
+  maxFileBytes: Number.MAX_SAFE_INTEGER,
+  maxTotalBytes: Number.MAX_SAFE_INTEGER,
   maxChunkChars: 64 * 1024,
 } as const;
 
@@ -58,7 +58,7 @@ export class UploadSession {
       }
       if (size > UPLOAD_LIMITS.maxFileBytes || this.files.size >= UPLOAD_LIMITS.maxFiles ||
           this.totalBytes + size > UPLOAD_LIMITS.maxTotalBytes) {
-        throw new UploadError("UPLOAD_LIMIT_EXCEEDED", "O envio permite até 100 fotos, 20 MiB por foto e 2 GiB por lote.");
+        throw new UploadError("UPLOAD_LIMIT_EXCEEDED", "Quantidade de fotos excedida ou metadados de tamanho inválidos.");
       }
       const expectedChars = 4 * Math.ceil(size / 3);
       if (message.totalBase64Length !== expectedChars) {

@@ -1,4 +1,6 @@
 import { WebSocket } from "ws";
+import { ConfirmedTransfers } from "./confirmedTransfers";
+import { CONFIRMED_PROTOCOL, FLOW_LIMITS } from "./confirmedProtocol";
 import { verifyToken } from "./auth";
 import { DataSource } from "./database/sqlite";
 import { UPLOAD_LIMITS, UPLOAD_PROTOCOL_VERSION, UploadError, UploadSession } from "./uploadProtocol";
@@ -10,18 +12,30 @@ export type ClientInfo = {
   id?: string; // client id
   upload?: UploadSession;
   uploadFailed?: boolean;
+  protocolVersion?: number;
 };
 
 const sessionLocks = new Map<string, string>();
 const clients = new Map<WebSocket, ClientInfo>();
 const datasource = new DataSource();
+const confirmed = new ConfirmedTransfers(send);
+export const confirmedUploadStats = () => ({ ...confirmed.snapshot(),
+  transportBufferedBytes: [...clients.values()].reduce((sum, client) => sum + (client.ws.bufferedAmount || 0), 0) });
+export const hasConfirmedKiosk = (sessionId: string) => confirmed.hasKiosk(sessionId);
+export const claimUploadPermission = (sessionId: string, ticket: unknown, customerId: string) => confirmed.claim(sessionId, ticket, customerId);
 
 export function register(ws: WebSocket, rawMsg: any) {}
 
 function send(ws: WebSocket, message: unknown): boolean {
   if (ws.readyState !== ws.OPEN) return false;
   try {
-    ws.send(JSON.stringify(message), (error) => {
+    const text = JSON.stringify(message);
+    const bytes = Buffer.byteLength(text);
+    const buffered = [...clients.values()].reduce((sum, client) => sum + (client.ws.bufferedAmount || 0), 0);
+    if ((ws.bufferedAmount || 0) + bytes > FLOW_LIMITS.frameBytes || buffered + bytes > FLOW_LIMITS.globalWindowBytes) {
+      cleanup(ws); ws.terminate(); return false;
+    }
+    ws.send(text, (error) => {
       if (error) {
         console.error("WS send error:", error.message);
         cleanup(ws);
@@ -48,8 +62,12 @@ function rejectUpload(ws: WebSocket, code: string, message: string) {
 }
 
 export function handleMessage(ws: WebSocket, message: any) {
-  if (!message || typeof message !== "object") return;
+  if (ws.readyState !== ws.OPEN || !message || typeof message !== "object") return;
   if (clients.get(ws)?.uploadFailed) return;
+  if (message.type !== "register" && confirmed.handle(ws, message)) return;
+  if (message.type !== "register" && message.type !== "healtcheck" && !clients.has(ws)) {
+    rejectUpload(ws, "UNREGISTERED", "Registre a conexão antes do envio."); return;
+  }
   switch (message.type) {
     case "healtcheck":
       {
@@ -57,6 +75,11 @@ export function handleMessage(ws: WebSocket, message: any) {
       break;
     case "unlock":
       {
+        const owner = clients.get(ws);
+        if (owner?.type !== "kiosk" || owner.sessionId !== message.sessionId) {
+          rejectUpload(ws, "INVALID_SESSION", "Somente o totem pode liberar sua sessão."); return;
+        }
+        if (owner.protocolVersion === CONFIRMED_PROTOCOL) confirmed.unlock(ws);
         const sessionId: String = message.sessionId;
         console.log("Unlock Kiosk Session", sessionId);
         sessionLocks.set(sessionId.toString(), "");
@@ -83,19 +106,32 @@ export function handleMessage(ws: WebSocket, message: any) {
           rejectUpload(ws, "INVALID_REGISTRATION", "Registro de conexão inválido.");
           return;
         }
-        if (message.protocolVersion !== undefined && message.protocolVersion !== UPLOAD_PROTOCOL_VERSION) {
+        if (message.protocolVersion !== undefined && message.protocolVersion !== UPLOAD_PROTOCOL_VERSION && message.protocolVersion !== CONFIRMED_PROTOCOL) {
           rejectUpload(ws, "UNSUPPORTED_PROTOCOL", "Versão de envio não suportada.");
           return;
         }
         const previous = clients.get(ws);
-        if (previous && (previous.type !== message.role || previous.sessionId !== sessionId || previous.id !== message.id)) {
+        if (previous && (previous.type !== message.role || previous.sessionId !== sessionId || previous.id !== message.id || previous.protocolVersion !== message.protocolVersion)) {
           rejectUpload(ws, "INVALID_REGISTRATION", "A conexão já pertence a outra sessão.");
           return;
+        }
+        if (message.role === "kiosk" && [...clients.values()].some(client => client.ws !== ws && client.type === "kiosk" &&
+          client.sessionId === sessionId && client.ws.readyState === client.ws.OPEN)) {
+          rejectUpload(ws, "DUPLICATE_KIOSK", "Já existe um totem conectado nesta sessão."); return;
+        }
+        try {
+          if (message.protocolVersion === CONFIRMED_PROTOCOL) confirmed.register(ws, message.role, sessionId, message.id, message.uploadTicket);
+          else if (message.role === "web" && confirmed.hasKiosk(sessionId)) {
+            rejectUpload(ws, "UPGRADE_REQUIRED", "Este totem exige o novo protocolo de envio."); return;
+          }
+        } catch (error) {
+          rejectUpload(ws, "UPLOAD_PERMISSION_REQUIRED", error instanceof Error ? error.message : "Permissão de envio inválida."); return;
         }
         const info: ClientInfo = {
           ws,
           type: message.role,
           sessionId,
+          protocolVersion: message.protocolVersion,
           id: message.id,
           upload: previous?.upload ?? (message.role === "web" && message.protocolVersion === UPLOAD_PROTOCOL_VERSION
             ? new UploadSession() : undefined),
@@ -122,8 +158,9 @@ export function handleMessage(ws: WebSocket, message: any) {
         console.info("WS Client Registered", { role: info.type, sessionId });
 
         send(ws, { type: "registered", role: info.type, sessionId,
-          ...(message.protocolVersion === UPLOAD_PROTOCOL_VERSION
-            ? { protocolVersion: UPLOAD_PROTOCOL_VERSION, uploadLimits: UPLOAD_LIMITS } : {}),
+          ...([UPLOAD_PROTOCOL_VERSION, CONFIRMED_PROTOCOL].includes(message.protocolVersion)
+            ? { protocolVersion: message.protocolVersion, uploadLimits: UPLOAD_LIMITS,
+                ...(message.protocolVersion === CONFIRMED_PROTOCOL ? { flowLimits: FLOW_LIMITS } : {}) } : {}),
         });
 
         if (info.type === "kiosk" && info.sessionId) {
@@ -150,6 +187,9 @@ export function handleMessage(ws: WebSocket, message: any) {
         const session =
           message.toSession || message.sessionId || message.session;
         const info = clients.get(ws);
+        if (info?.type !== "web" || info.sessionId !== session) {
+          rejectUpload(ws, "INVALID_SESSION", "O envio não pertence a esta sessão."); return;
+        }
         if (info?.upload) {
           if (info.sessionId !== session) {
             rejectUpload(ws, "INVALID_SESSION", "O envio não pertence a esta sessão.");
@@ -176,6 +216,9 @@ export function handleMessage(ws: WebSocket, message: any) {
       {
         const session = message.toSession;
         const info = clients.get(ws);
+        if (info?.type !== "web" || info.sessionId !== session) {
+          rejectUpload(ws, "INVALID_SESSION", "O envio não pertence a esta sessão."); return;
+        }
         if (info?.upload) {
           if (info.sessionId !== session) {
             rejectUpload(ws, "INVALID_SESSION", "O envio não pertence a esta sessão.");
@@ -216,9 +259,10 @@ export function handleMessage(ws: WebSocket, message: any) {
 }
 
 export function cleanup(ws: WebSocket) {
+  confirmed.cleanup(ws);
   const info = clients.get(ws);
   clients.delete(ws);
-  if (info?.type === "web" && info.sessionId &&
+  if (info?.type === "web" && info.protocolVersion !== CONFIRMED_PROTOCOL && info.sessionId &&
       ![...clients.values()].some(c => c.type === "web" && c.sessionId === info.sessionId)) {
     sessionLocks.delete(info.sessionId);
   }

@@ -2,7 +2,7 @@ import express, { response } from "express";
 import http from "http";
 import cors from "cors";
 import { WebSocketServer } from "ws";
-import { handleMessage, cleanup, sendToKiosk } from "./wsBridge";
+import { handleMessage, cleanup, sendToKiosk, hasConfirmedKiosk, claimUploadPermission, confirmedUploadStats } from "./wsBridge";
 import { DataSource } from "./database/sqlite";
 import { msUntilNextMidnight } from "./util/MsUntilNextMidnight";
 
@@ -74,7 +74,7 @@ wss.on("connection", (ws) => {
   ws.on("close", () => cleanup(ws));
 });
 
-app.get("/health", (request, response) => response.json({ ok: true }));
+app.get("/health", (request, response) => response.json({ ok: true, uploads: confirmedUploadStats() }));
 app.get("/", (request, response) => response.json({ ok: true }));
 app.get("/sessions", (request, response) => {
   const sessions = datasource.getSessions();
@@ -139,6 +139,9 @@ app.get("/session/:code/:customerId", (request, response) => {
       response.status(500).json({ error: "Internal server error" });
     } else {
       if (row) {
+        if (hasConfirmedKiosk(code) && !claimUploadPermission(code, request.query.uploadTicket, customerId)) {
+          response.status(403).json({ error: "Releia o QR Code atual no totem para autorizar o envio." }); return;
+        }
         if (row.in_use == 0) {
           datasource.updateSession(row.id, true, customerId);
         }
@@ -148,7 +151,7 @@ app.get("/session/:code/:customerId", (request, response) => {
           bridgeServerAddress: row.bridge_server_address,
           expiresOn: row.expires_on,
           inUse: row.in_use == 1,
-          customerId: row.customer_id,
+          customerId: row.in_use == 0 ? customerId : row.customer_id,
         });
       } else {
         response

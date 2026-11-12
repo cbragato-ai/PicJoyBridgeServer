@@ -18,7 +18,7 @@ app.use(
 );
 app.options("*", cors()); // Permite pré-flight para todas as rotas
 const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
 const datasource = new DataSource();
 
 // Clear expired sessions every day at midnight
@@ -44,6 +44,11 @@ server.on("upgrade", (request, socket, head) => {
 
 // Quando um cliente novo se conecta
 wss.on("connection", (ws) => {
+  ws.on("error", (error) => {
+    console.error("WS connection error:", error.message);
+    cleanup(ws);
+    ws.terminate();
+  });
   ws.on("message", (raw) => {
     try {
       let text: string;

@@ -6,6 +6,7 @@
     "scripts": {
         "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
         "build": "tsc -p .",
+        "test:upload": "node --test tests/upload-stage1.test.cjs",
         "start": "node dist/index.js"
     },
     "dependencies": {

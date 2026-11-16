@@ -84,8 +84,11 @@ export class ConfirmedTransfers {
   private arm(transfer: Transfer, finishing: boolean) {
     if (transfer.timer) clearTimeout(transfer.timer);
     const remaining = FLOW_LIMITS.transferTimeoutMs - (Date.now() - transfer.startedAt);
-    transfer.timer = setTimeout(() => this.abort(transfer.web.sessionId, "ACK_TIMEOUT", "O totem não confirmou o envio no prazo. Reinicie junto ao totem."),
-      Math.max(1, Math.min(remaining, finishing ? FLOW_LIMITS.completionTimeoutMs : FLOW_LIMITS.requestTimeoutMs)));
+    const timeoutMs = Math.max(1, Math.min(remaining, finishing ? FLOW_LIMITS.completionTimeoutMs : FLOW_LIMITS.requestTimeoutMs));
+    const operation = transfer.pending?.operation ?? "próxima solicitação";
+    const requestId = transfer.pending?.id ?? transfer.next;
+    transfer.timer = setTimeout(() => this.abort(transfer.web.sessionId, "ACK_TIMEOUT",
+      `O totem não confirmou ${operation} (solicitação ${requestId}) em ${Math.ceil(timeoutMs / 1000)} segundos. Reinicie junto ao totem.`), timeoutMs);
     transfer.timer.unref?.();
   }
   private error(ws: WebSocket, message: string) {

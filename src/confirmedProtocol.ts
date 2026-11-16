@@ -6,7 +6,7 @@ export const FLOW_LIMITS = {
   frameBytes: 128 * 1024,
   maxTransfers: 32,
   globalWindowBytes: 4 * 1024 * 1024,
-  requestTimeoutMs: 60_000,
+  requestTimeoutMs: 5 * 60_000,
   completionTimeoutMs: 610_000,
   transferTimeoutMs: 2 * 60 * 60_000,
   permissionTimeoutMs: 10 * 60_000,

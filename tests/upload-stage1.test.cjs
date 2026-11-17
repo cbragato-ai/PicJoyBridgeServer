@@ -98,6 +98,29 @@ test('registro repetido mantém uma entrada e não reinicia os contadores do upl
   assert.equal(kiosk.messages.at(-1).type, 'transfer-error');
 });
 
+test('sessões ignoram maiúsculas/minúsculas e web recebe estado atual do totem', () => {
+  const api = bridge(), kiosk = new Socket(), web = new Socket();
+  api.handleMessage(kiosk, { type: 'register', role: 'kiosk', id: 'bx140617', sessionId: 'bx140617', protocolVersion: 2 });
+  api.handleMessage(kiosk, { type: 'unlock', maxFiles: 10, sessionId: 'BX140617' });
+  const ticket = kiosk.messages.find(message => message.type === 'upload-permission').uploadTicket;
+  assert.equal(api.claimUploadPermission('bx140617', ticket, 'customer-1'), true);
+  api.handleMessage(web, { type: 'register', role: 'web', id: 'customer-1', sessionId: 'BX140617', protocolVersion: 2, uploadTicket: ticket });
+  assert.equal(web.messages.find(message => message.type === 'registered').sessionId, 'BX140617');
+  assert.equal(web.messages.find(message => message.type === 'device-status').status, 'online');
+  api.cleanup(kiosk);
+  assert.equal(web.messages.at(-1).status, 'offline');
+  api.cleanup(web);
+});
+
+test('web que conecta antes do totem recebe atualização de online', () => {
+  const api = bridge(), web = new Socket(), kiosk = new Socket();
+  api.handleMessage(web, { type: 'register', role: 'web', id: 'web-client', sessionId: 'BX140617', protocolVersion: 1 });
+  assert.equal(web.messages.find(message => message.type === 'device-status').status, 'offline');
+  api.handleMessage(kiosk, { type: 'register', role: 'kiosk', id: 'kiosk', sessionId: 'bx140617', protocolVersion: 1 });
+  assert.equal(web.messages.at(-1).status, 'online');
+  api.cleanup(kiosk); api.cleanup(web);
+});
+
 test('legado continua encaminhado; v1 recusa destino ausente e sessão diferente', () => {
   const api = bridge(), kiosk = new Socket(), legacy = new Socket();
   register(api, kiosk, 'kiosk');
@@ -210,7 +233,7 @@ function confirmedSession(api = bridge(), sessionId = 'TEST0001', maxFiles = 100
   const ticket = kiosk.messages.findLast(message => message.type === 'upload-permission').uploadTicket;
   assert.equal(api.claimUploadPermission(sessionId, ticket, 'customer-' + sessionId), true);
   api.handleMessage(web, { type: 'register', role: 'web', id: 'customer-' + sessionId, sessionId, protocolVersion: 2, uploadTicket: ticket });
-  assert.equal(web.messages.at(-1).protocolVersion, 2);
+  assert.equal(web.messages.findLast(message => message.type === 'registered').protocolVersion, 2);
   return { api, kiosk, web, ticket, sessionId };
 }
 const v2request = (requestId, operation, extra = {}) => ({ type: 'upload-request', protocolVersion: 2,

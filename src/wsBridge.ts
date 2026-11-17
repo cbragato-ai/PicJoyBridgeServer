@@ -19,10 +19,11 @@ const sessionLocks = new Map<string, string>();
 const clients = new Map<WebSocket, ClientInfo>();
 const datasource = new DataSource();
 const confirmed = new ConfirmedTransfers(send);
+const normalizeSession = (value: string) => value.trim().toUpperCase();
 export const confirmedUploadStats = () => ({ ...confirmed.snapshot(),
   transportBufferedBytes: [...clients.values()].reduce((sum, client) => sum + (client.ws.bufferedAmount || 0), 0) });
-export const hasConfirmedKiosk = (sessionId: string) => confirmed.hasKiosk(sessionId);
-export const claimUploadPermission = (sessionId: string, ticket: unknown, customerId: string) => confirmed.claim(sessionId, ticket, customerId);
+export const hasConfirmedKiosk = (sessionId: string) => confirmed.hasKiosk(normalizeSession(sessionId));
+export const claimUploadPermission = (sessionId: string, ticket: unknown, customerId: string) => confirmed.claim(normalizeSession(sessionId), ticket, customerId);
 
 export function register(ws: WebSocket, rawMsg: any) {}
 
@@ -76,14 +77,14 @@ export function handleMessage(ws: WebSocket, message: any) {
     case "unlock":
       {
         const owner = clients.get(ws);
-        if (owner?.type !== "kiosk" || owner.sessionId !== message.sessionId) {
+        const sessionId = typeof message.sessionId === "string" ? normalizeSession(message.sessionId) : "";
+        if (owner?.type !== "kiosk" || owner.sessionId !== sessionId) {
           rejectUpload(ws, "INVALID_SESSION", "Somente o totem pode liberar sua sessão."); return;
         }
         if (owner.protocolVersion === CONFIRMED_PROTOCOL) confirmed.unlock(ws, message.maxFiles);
-        const sessionId: String = message.sessionId;
         console.log("Unlock Kiosk Session", sessionId);
-        sessionLocks.set(sessionId.toString(), "");
-        datasource.getSessionByCode(sessionId.toUpperCase(), (err, row) => {
+        sessionLocks.set(sessionId, "");
+        datasource.getSessionByCode(sessionId, (err, row) => {
           if (err) {
             console.error("Error retrieving session:", err);
           } else {
@@ -101,11 +102,12 @@ export function handleMessage(ws: WebSocket, message: any) {
     case "register":
       {
         const tokenData = verifyToken(message.token || "");
-        const sessionId = tokenData?.sessionId || message.sessionId;
-        if ((message.role !== "web" && message.role !== "kiosk") || typeof sessionId !== "string" || !sessionId) {
+        const rawSessionId = tokenData?.sessionId || message.sessionId;
+        if ((message.role !== "web" && message.role !== "kiosk") || typeof rawSessionId !== "string" || !rawSessionId.trim()) {
           rejectUpload(ws, "INVALID_REGISTRATION", "Registro de conexão inválido.");
           return;
         }
+        const sessionId = normalizeSession(rawSessionId);
         if (message.protocolVersion !== undefined && message.protocolVersion !== UPLOAD_PROTOCOL_VERSION && message.protocolVersion !== CONFIRMED_PROTOCOL) {
           rejectUpload(ws, "UNSUPPORTED_PROTOCOL", "Versão de envio não suportada.");
           return;
@@ -156,6 +158,12 @@ export function handleMessage(ws: WebSocket, message: any) {
 
         clients.set(ws, info);
         console.info("WS Client Registered", { role: info.type, sessionId });
+
+        if (info.type === "web") {
+          send(ws, { type: "device-status", sessionId, status: confirmed.hasKiosk(sessionId) ||
+            [...clients.values()].some(client => client.type === "kiosk" && client.sessionId === sessionId && client.ws.readyState === client.ws.OPEN)
+            ? "online" : "offline" });
+        }
 
         send(ws, { type: "registered", role: info.type, sessionId,
           ...([UPLOAD_PROTOCOL_VERSION, CONFIRMED_PROTOCOL].includes(message.protocolVersion)
@@ -262,6 +270,13 @@ export function cleanup(ws: WebSocket) {
   confirmed.cleanup(ws);
   const info = clients.get(ws);
   clients.delete(ws);
+  if (info?.type === "kiosk" && info.sessionId) {
+    for (const client of clients.values()) {
+      if (client.type === "web" && client.sessionId === info.sessionId && client.ws.readyState === client.ws.OPEN) {
+        send(client.ws, { type: "device-status", sessionId: info.sessionId, status: "offline" });
+      }
+    }
+  }
   if (info?.type === "web" && info.protocolVersion !== CONFIRMED_PROTOCOL && info.sessionId &&
       ![...clients.values()].some(c => c.type === "web" && c.sessionId === info.sessionId)) {
     sessionLocks.delete(info.sessionId);
@@ -269,6 +284,7 @@ export function cleanup(ws: WebSocket) {
 }
 
 export function sendToKiosk(sessionId: string, message: any): boolean {
+  sessionId = normalizeSession(sessionId);
   let sent = false;
 
   for (const client of clients.values()) {

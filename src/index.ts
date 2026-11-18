@@ -71,7 +71,7 @@ wss.on("connection", (ws) => {
     }
   });
 
-  ws.on("close", () => cleanup(ws));
+  ws.on("close", (code, reason) => cleanup(ws, code, reason.toString()));
 });
 
 app.get("/health", (request, response) => response.json({ ok: true, uploads: confirmedUploadStats() }));

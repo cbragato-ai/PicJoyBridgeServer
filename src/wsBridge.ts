@@ -266,9 +266,17 @@ export function handleMessage(ws: WebSocket, message: any) {
   }
 }
 
-export function cleanup(ws: WebSocket) {
+export function cleanup(ws: WebSocket, closeCode?: number, closeReason?: string) {
   confirmed.cleanup(ws);
   const info = clients.get(ws);
+  if (closeCode !== undefined) {
+    console.warn("WS client closed", {
+      role: info?.type ?? "unregistered",
+      protocolVersion: info?.protocolVersion,
+      closeCode,
+      closeReason,
+    });
+  }
   clients.delete(ws);
   if (info?.type === "kiosk" && info.sessionId) {
     for (const client of clients.values()) {

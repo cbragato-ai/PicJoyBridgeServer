@@ -236,6 +236,16 @@ function confirmedSession(api = bridge(), sessionId = 'TEST0001', maxFiles = 100
   assert.equal(web.messages.findLast(message => message.type === 'registered').protocolVersion, 2);
   return { api, kiosk, web, ticket, sessionId };
 }
+test('autorização confirmada permite reconectar o uploader após queda antes do envio', () => {
+  const app = confirmedSession();
+  app.api.cleanup(app.web);
+  const resumed = new Socket();
+  app.api.handleMessage(resumed, { type: 'register', role: 'web', id: 'customer-' + app.sessionId,
+    sessionId: app.sessionId, protocolVersion: 2, uploadTicket: app.ticket });
+  assert.equal(resumed.messages.find(message => message.type === 'registered').protocolVersion, 2);
+  assert.equal(app.api.claimUploadPermission(app.sessionId, app.ticket, 'customer-' + app.sessionId), false);
+  app.api.cleanup(resumed); app.api.cleanup(app.kiosk);
+});
 const v2request = (requestId, operation, extra = {}) => ({ type: 'upload-request', protocolVersion: 2,
   transferId: 'synthetic-transfer', requestId, operation, ...extra });
 const v2files = [{ fileId: 'file-a', name: 'foto.jpg', mime: 'image/jpeg', size: 3 }];

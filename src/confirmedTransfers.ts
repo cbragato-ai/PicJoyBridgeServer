@@ -38,8 +38,10 @@ export class ConfirmedTransfers {
     if (role === "kiosk") {
       requireUpload(!this.hasKiosk(sessionId), "Já existe um totem conectado para esta sessão.");
     } else {
+      requireUpload(![...this.peers.values()].some(peer => peer.role === "web" && peer.sessionId === sessionId && peer.ws.readyState === peer.ws.OPEN),
+        "Já existe um uploader conectado nesta sessão.");
       const permission = this.permissions.get(sessionId);
-      requireUpload(permission && !permission.revoked && !permission.used && permission.expiresAt > Date.now() && permission.ticket === ticket &&
+      requireUpload(permission && !permission.revoked && (!permission.used || !this.transfers.has(sessionId)) && permission.expiresAt > Date.now() && permission.ticket === ticket &&
         permission.customerId === id, "Permissão inválida ou consumida. Releia o QR Code no totem.");
       permission.used = true;
     }
@@ -78,7 +80,7 @@ export class ConfirmedTransfers {
     const peer = this.peers.get(ws); if (!peer) return;
     this.peers.delete(ws);
     this.abort(peer.sessionId, "PEER_DISCONNECTED", "A conexão foi interrompida. Reinicie o envio junto ao totem.");
-    if (peer.role === "kiosk" || this.permissions.get(peer.sessionId)?.ticket === peer.ticket) this.revoke(peer.sessionId);
+    if (peer.role === "kiosk" || (this.permissions.get(peer.sessionId)?.ticket === peer.ticket && this.transfers.has(peer.sessionId))) this.revoke(peer.sessionId);
     if (peer.role === "kiosk") this.permissions.delete(peer.sessionId);
   }
   private arm(transfer: Transfer, finishing: boolean) {

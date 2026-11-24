@@ -33,7 +33,10 @@ function send(ws: WebSocket, message: unknown): boolean {
     const text = JSON.stringify(message);
     const bytes = Buffer.byteLength(text);
     const buffered = [...clients.values()].reduce((sum, client) => sum + (client.ws.bufferedAmount || 0), 0);
-    if ((ws.bufferedAmount || 0) + bytes > FLOW_LIMITS.frameBytes || buffered + bytes > FLOW_LIMITS.globalWindowBytes) {
+    const perSocketLimit = (message as { type?: string; protocolVersion?: number }).type === "upload-request" &&
+      (message as { protocolVersion?: number }).protocolVersion === CONFIRMED_PROTOCOL
+      ? FLOW_LIMITS.transferWindowBytes : FLOW_LIMITS.frameBytes;
+    if ((ws.bufferedAmount || 0) + bytes > perSocketLimit || buffered + bytes > FLOW_LIMITS.globalWindowBytes) {
       cleanup(ws); ws.terminate(); return false;
     }
     ws.send(text, (error) => {
@@ -122,7 +125,8 @@ export function handleMessage(ws: WebSocket, message: any) {
           rejectUpload(ws, "DUPLICATE_KIOSK", "Já existe um totem conectado nesta sessão."); return;
         }
         try {
-          if (message.protocolVersion === CONFIRMED_PROTOCOL) confirmed.register(ws, message.role, sessionId, message.id, message.uploadTicket);
+          if (message.protocolVersion === CONFIRMED_PROTOCOL) confirmed.register(ws, message.role, sessionId, message.id, message.uploadTicket,
+            message.role === "kiosk" && message.flowLimits?.maxInFlightRequests >= 2 && message.flowLimits?.transferWindowBytes >= FLOW_LIMITS.frameBytes);
           else if (message.role === "web" && confirmed.hasKiosk(sessionId)) {
             rejectUpload(ws, "UPGRADE_REQUIRED", "Este totem exige o novo protocolo de envio."); return;
           }
@@ -168,7 +172,7 @@ export function handleMessage(ws: WebSocket, message: any) {
         send(ws, { type: "registered", role: info.type, sessionId,
           ...([UPLOAD_PROTOCOL_VERSION, CONFIRMED_PROTOCOL].includes(message.protocolVersion)
             ? { protocolVersion: message.protocolVersion, uploadLimits: message.protocolVersion === CONFIRMED_PROTOCOL ? { ...UPLOAD_LIMITS, maxFiles: confirmed.capacity(ws) } : UPLOAD_LIMITS,
-                ...(message.protocolVersion === CONFIRMED_PROTOCOL ? { flowLimits: FLOW_LIMITS, printCapacity: { maxFiles: confirmed.capacity(ws) } } : {}) } : {}),
+                ...(message.protocolVersion === CONFIRMED_PROTOCOL ? { flowLimits: confirmed.flowLimits(ws), printCapacity: { maxFiles: confirmed.capacity(ws) } } : {}) } : {}),
         });
 
         if (info.type === "kiosk" && info.sessionId) {

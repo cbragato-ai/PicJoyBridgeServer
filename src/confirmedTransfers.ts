@@ -2,10 +2,12 @@ import { randomBytes, createHash } from "node:crypto";
 import { WebSocket } from "ws";
 import { CONFIRMED_PROTOCOL, FLOW_LIMITS, ConfirmedManifest, UploadRequest, UploadAck, requireUpload, validId } from "./confirmedProtocol";
 
-type Peer = { ws: WebSocket; role: "web" | "kiosk"; sessionId: string; id: string; ticket?: string; maxFiles?: number; completed?: { ack: UploadAck; fingerprint: string } };
-type Permission = { ticket: string; kiosk: WebSocket; expiresAt: number; customerId?: string; used: boolean; maxFiles: number; revoked?: boolean };
+type Peer = { ws: WebSocket; role: "web" | "kiosk"; sessionId: string; id: string; ticket?: string; maxFiles?: number; canPipeline?: boolean; completed?: { ack: UploadAck; fingerprint: string } };
+type Permission = { ticket: string; kiosk: WebSocket; expiresAt: number; customerId?: string; used: boolean; maxFiles: number;
+  transferWindowBytes: number; maxInFlightRequests: number; revoked?: boolean };
 type Transfer = { id: string; web: Peer; kiosk: Peer; manifest: ConfirmedManifest; next: number;
-  pending?: { id: number; fingerprint: string; operation: string; bytes: number }; last?: { ack: UploadAck; fingerprint: string };
+  pending: Map<number, { fingerprint: string; operation: string; bytes: number }>;
+  recent: Map<number, { ack: UploadAck; fingerprint: string }>;
   startedAt: number; timer?: ReturnType<typeof setTimeout> };
 
 export class ConfirmedTransfers {
@@ -15,13 +17,18 @@ export class ConfirmedTransfers {
   private peakInFlightBytes = 0;
   snapshot() {
     const transfers = [...this.transfers.values()];
-    return { activeTransfers: transfers.length, pendingRequests: transfers.filter(transfer => transfer.pending).length,
-      inFlightBytes: transfers.reduce((sum, transfer) => sum + (transfer.pending?.bytes || 0), 0),
+    return { activeTransfers: transfers.length, pendingRequests: transfers.reduce((sum, transfer) => sum + transfer.pending.size, 0),
+      inFlightBytes: transfers.reduce((sum, transfer) => sum + [...transfer.pending.values()].reduce((bytes, item) => bytes + item.bytes, 0), 0),
       peakInFlightBytes: this.peakInFlightBytes, globalWindowBytes: FLOW_LIMITS.globalWindowBytes };
   }
   constructor(private send: (ws: WebSocket, message: unknown) => boolean) {}
 
   capacity(ws: WebSocket) { return this.peers.get(ws)?.maxFiles ?? 0; }
+  flowLimits(ws: WebSocket) {
+    const permission = this.permissions.get(this.peers.get(ws)?.sessionId ?? "");
+    return { ...FLOW_LIMITS, transferWindowBytes: permission?.transferWindowBytes ?? FLOW_LIMITS.frameBytes,
+      maxInFlightRequests: permission?.maxInFlightRequests ?? 1 };
+  }
   hasKiosk(session: string) { return [...this.peers.values()].some(p => p.role === "kiosk" && p.sessionId === session); }
   claim(session: string, ticket: unknown, customer: string): boolean {
     const permission = this.permissions.get(session);
@@ -29,7 +36,7 @@ export class ConfirmedTransfers {
       !validId(customer) || (permission.customerId && permission.customerId !== customer)) return false;
     permission.customerId = customer; return true;
   }
-  register(ws: WebSocket, role: "web" | "kiosk", sessionId: string, id: string, ticket?: unknown) {
+  register(ws: WebSocket, role: "web" | "kiosk", sessionId: string, id: string, ticket?: unknown, canPipeline = false) {
     const previous = this.peers.get(ws);
     if (previous) {
       requireUpload(previous.role === role && previous.sessionId === sessionId && previous.id === id, "Registro já vinculado a outra sessão."); return;
@@ -45,7 +52,8 @@ export class ConfirmedTransfers {
         permission.customerId === id, "Permissão inválida ou consumida. Releia o QR Code no totem.");
       permission.used = true;
     }
-    this.peers.set(ws, { ws, role, sessionId, id, ...(role === "web" ? { ticket: ticket as string, maxFiles: this.permissions.get(sessionId)!.maxFiles } : {}) });
+    this.peers.set(ws, { ws, role, sessionId, id, ...(role === "kiosk" ? { canPipeline } : {}),
+      ...(role === "web" ? { ticket: ticket as string, maxFiles: this.permissions.get(sessionId)!.maxFiles } : {}) });
   }
   unlock(ws: WebSocket, maxFiles: unknown = 0) {
     const peer = this.peers.get(ws);
@@ -58,7 +66,10 @@ export class ConfirmedTransfers {
       web.ws.close(1008, "SESSION_RESET");
     }
     const capacity = typeof maxFiles === "number" && Number.isSafeInteger(maxFiles) && maxFiles >= 0 ? Math.min(100, maxFiles) : 0;
-    const permission = { maxFiles: capacity, ticket: randomBytes(32).toString("hex"), kiosk: ws,
+    const permission = { maxFiles: capacity,
+      transferWindowBytes: peer.canPipeline ? FLOW_LIMITS.transferWindowBytes : FLOW_LIMITS.frameBytes,
+      maxInFlightRequests: peer.canPipeline ? FLOW_LIMITS.maxInFlightRequests : 1,
+      ticket: randomBytes(32).toString("hex"), kiosk: ws,
       expiresAt: Date.now() + FLOW_LIMITS.permissionTimeoutMs, used: false };
     this.permissions.set(peer.sessionId, permission);
     this.send(ws, { type: "upload-permission", protocolVersion: CONFIRMED_PROTOCOL, uploadTicket: permission.ticket,
@@ -87,8 +98,9 @@ export class ConfirmedTransfers {
     if (transfer.timer) clearTimeout(transfer.timer);
     const remaining = FLOW_LIMITS.transferTimeoutMs - (Date.now() - transfer.startedAt);
     const timeoutMs = Math.max(1, Math.min(remaining, finishing ? FLOW_LIMITS.completionTimeoutMs : FLOW_LIMITS.requestTimeoutMs));
-    const operation = transfer.pending?.operation ?? "próxima solicitação";
-    const requestId = transfer.pending?.id ?? transfer.next;
+    const first = transfer.pending.entries().next().value as [number, { operation: string }] | undefined;
+    const operation = first?.[1].operation ?? "próxima solicitação";
+    const requestId = first?.[0] ?? transfer.next;
     transfer.timer = setTimeout(() => this.abort(transfer.web.sessionId, "ACK_TIMEOUT",
       `O totem não confirmou ${operation} (solicitação ${requestId}) em ${Math.ceil(timeoutMs / 1000)} segundos. Reinicie junto ao totem.`), timeoutMs);
     transfer.timer.unref?.();
@@ -104,7 +116,8 @@ export class ConfirmedTransfers {
       try {
         const request = raw as unknown as UploadRequest;
         const serialized = JSON.stringify(request);
-        requireUpload(Buffer.byteLength(serialized) <= FLOW_LIMITS.frameBytes && request.protocolVersion === 2 &&
+        const requestBytes = Buffer.byteLength(serialized);
+        requireUpload(requestBytes <= FLOW_LIMITS.frameBytes && request.protocolVersion === 2 &&
           validId(request.transferId) && Number.isSafeInteger(request.requestId) && request.requestId >= 0, "Mensagem de envio inválida.");
         const fingerprint = createHash("sha256").update(serialized).digest("hex");
         if (peer.completed) {
@@ -121,22 +134,28 @@ export class ConfirmedTransfers {
           requireUpload(this.transfers.size < FLOW_LIMITS.maxTransfers &&
             (this.transfers.size + 1) * FLOW_LIMITS.frameBytes <= FLOW_LIMITS.globalWindowBytes, "Capacidade de envios atingida. Tente novamente junto ao totem.");
           transfer = { id: request.transferId, web: peer, kiosk, manifest: new ConfirmedManifest(request.files, peer.maxFiles ?? 0),
-            next: 0, startedAt: Date.now() };
+            next: 0, pending: new Map(), recent: new Map(), startedAt: Date.now() };
           this.transfers.set(peer.sessionId, transfer);
         }
         requireUpload(transfer.web.ws === ws && transfer.id === request.transferId, "Transferência não pertence a esta conexão.");
-        if (transfer.last?.ack.requestId === request.requestId) {
-          requireUpload(transfer.last.fingerprint === fingerprint, "Repetição com conteúdo diferente."); this.send(ws, transfer.last.ack); return true;
+        const recent = transfer.recent.get(request.requestId);
+        if (recent) {
+          requireUpload(recent.fingerprint === fingerprint, "Repetição com conteúdo diferente."); this.send(ws, recent.ack); return true;
         }
-        if (transfer.pending) {
-          requireUpload(transfer.pending.id === request.requestId && transfer.pending.fingerprint === fingerprint, "Aguarde a confirmação do bloco anterior.");
+        const pending = transfer.pending.get(request.requestId);
+        if (pending) {
+          requireUpload(pending.fingerprint === fingerprint, "Repetição com conteúdo diferente.");
           return true; // Repetição ainda pendente não cria outra cópia na fila de saída.
         }
         requireUpload(request.requestId === transfer.next, "Sequência de requisição inválida.");
+        const currentBytes = [...transfer.pending.values()].reduce((sum, item) => sum + item.bytes, 0);
+        requireUpload(transfer.pending.size < FLOW_LIMITS.maxInFlightRequests && currentBytes + requestBytes <= FLOW_LIMITS.transferWindowBytes,
+          "Janela de transferência excedida.");
         if (request.requestId > 0) transfer.manifest.accept(request);
         else requireUpload(request.operation === "start", "Manifesto inválido.");
-        requireUpload(transfer.kiosk.ws.bufferedAmount + Buffer.byteLength(serialized) <= FLOW_LIMITS.frameBytes, "O orçamento de saída da sessão foi excedido.");
-        transfer.pending = { id: request.requestId, fingerprint, operation: request.operation, bytes: Buffer.byteLength(serialized) };
+        requireUpload(transfer.kiosk.ws.bufferedAmount + requestBytes <= FLOW_LIMITS.transferWindowBytes, "O orçamento de saída da sessão foi excedido.");
+        transfer.pending.set(request.requestId, { fingerprint, operation: request.operation, bytes: requestBytes });
+        transfer.next++;
         this.peakInFlightBytes = Math.max(this.peakInFlightBytes, this.snapshot().inFlightBytes);
         this.arm(transfer, request.operation === "finish");
         requireUpload(this.send(transfer.kiosk.ws, request), "Totem desconectado.");
@@ -152,15 +171,19 @@ export class ConfirmedTransfers {
     }
     if (raw.type === "upload-ack") {
       const transfer = peer && this.transfers.get(peer.sessionId);
-      if (!transfer || peer?.role !== "kiosk" || transfer.kiosk.ws !== ws || raw.transferId !== transfer.id || raw.protocolVersion !== 2) return true;
-      if (raw.requestId === transfer.last?.ack.requestId) return true;
-      if (!transfer.pending || raw.requestId !== transfer.pending.id) {
+      if (!transfer || peer?.role !== "kiosk" || transfer.kiosk.ws !== ws || raw.transferId !== transfer.id || raw.protocolVersion !== 2 ||
+        typeof raw.requestId !== "number" || !Number.isSafeInteger(raw.requestId) || raw.requestId < 0) return true;
+      const requestId = raw.requestId;
+      if (transfer.recent.has(requestId)) return true;
+      const pending = transfer.pending.get(requestId);
+      if (!pending) {
         this.abort(peer.sessionId, "INVALID_ACK", "Confirmação de envio fora de sequência."); return true;
       }
-      const ack: UploadAck = { type: "upload-ack", protocolVersion: 2, transferId: transfer.id, requestId: transfer.pending.id };
-      const last = { ack, fingerprint: transfer.pending.fingerprint }, finished = transfer.pending.operation === "finish";
-      transfer.last = last; transfer.pending = undefined; transfer.next++;
-      if (finished) { transfer.web.completed = last; this.remove(transfer); }
+      const ack: UploadAck = { type: "upload-ack", protocolVersion: 2, transferId: transfer.id, requestId };
+      const completed = { ack, fingerprint: pending.fingerprint }, finished = pending.operation === "finish";
+      transfer.pending.delete(ack.requestId); transfer.recent.set(ack.requestId, completed);
+      while (transfer.recent.size > FLOW_LIMITS.maxInFlightRequests * 2) transfer.recent.delete(transfer.recent.keys().next().value!);
+      if (finished) { transfer.web.completed = completed; this.remove(transfer); }
       else this.arm(transfer, false);
       this.send(transfer.web.ws, ack); return true;
     }

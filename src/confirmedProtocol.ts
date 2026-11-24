@@ -4,6 +4,8 @@ export const CONFIRMED_PROTOCOL = 2;
 export const FLOW_LIMITS = {
   chunkBytes: 48 * 1024,
   frameBytes: 128 * 1024,
+  transferWindowBytes: 640 * 1024,
+  maxInFlightRequests: 8,
   maxTransfers: 32,
   globalWindowBytes: 4 * 1024 * 1024,
   requestTimeoutMs: 5 * 60_000,

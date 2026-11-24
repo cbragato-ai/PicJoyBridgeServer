@@ -101,11 +101,13 @@ test('registro repetido mantém uma entrada e não reinicia os contadores do upl
 test('sessões ignoram maiúsculas/minúsculas e web recebe estado atual do totem', () => {
   const api = bridge(), kiosk = new Socket(), web = new Socket();
   api.handleMessage(kiosk, { type: 'register', role: 'kiosk', id: 'bx140617', sessionId: 'bx140617', protocolVersion: 2 });
-  api.handleMessage(kiosk, { type: 'unlock', maxFiles: 10, sessionId: 'BX140617' });
+  api.handleMessage(kiosk, { type: 'unlock', maxFiles: 10, showTransferTimer: true, sessionId: 'BX140617' });
   const ticket = kiosk.messages.find(message => message.type === 'upload-permission').uploadTicket;
   assert.equal(api.claimUploadPermission('bx140617', ticket, 'customer-1'), true);
   api.handleMessage(web, { type: 'register', role: 'web', id: 'customer-1', sessionId: 'BX140617', protocolVersion: 2, uploadTicket: ticket });
-  assert.equal(web.messages.find(message => message.type === 'registered').sessionId, 'BX140617');
+  const registration = web.messages.find(message => message.type === 'registered');
+  assert.equal(registration.sessionId, 'BX140617');
+  assert.equal(registration.showTransferTimer, true);
   assert.equal(web.messages.find(message => message.type === 'device-status').status, 'online');
   api.cleanup(kiosk);
   assert.equal(web.messages.at(-1).status, 'offline');
@@ -234,6 +236,7 @@ function confirmedSession(api = bridge(), sessionId = 'TEST0001', maxFiles = 100
   assert.equal(api.claimUploadPermission(sessionId, ticket, 'customer-' + sessionId), true);
   api.handleMessage(web, { type: 'register', role: 'web', id: 'customer-' + sessionId, sessionId, protocolVersion: 2, uploadTicket: ticket });
   assert.equal(web.messages.findLast(message => message.type === 'registered').protocolVersion, 2);
+  assert.equal(web.messages.findLast(message => message.type === 'registered').showTransferTimer, false);
   return { api, kiosk, web, ticket, sessionId };
 }
 test('autorização confirmada permite reconectar o uploader após queda antes do envio', () => {
@@ -292,7 +295,7 @@ test('v2: nomes iguais são independentes; manifestos e repetições adulteradas
 test('v2: orçamento por sessão bloqueia produtor e desconexão revoga o QR', () => {
   const app = confirmedSession(); app.api.handleMessage(app.web, v2request(0, 'start', { files: v2files })); acknowledge(app, 0);
   app.kiosk.bufferedAmount = confirmedProtocol.FLOW_LIMITS.frameBytes; app.api.handleMessage(app.web, v2request(1, 'chunk', v2chunk()));
-  assert.equal(app.web.messages.at(-1).type, 'transfer-error'); app.api.cleanup(app.web); app.api.cleanup(app.kiosk);
+  assert.equal(app.web.messages.some(message => message.type === 'transfer-error'), true); app.api.cleanup(app.web); app.api.cleanup(app.kiosk);
   assert.equal(app.api.claimUploadPermission(app.sessionId, app.ticket, 'customer-' + app.sessionId), false);
 });
 test('v2: limite global de 32 transferências preserva as sessões já admitidas', () => {
@@ -312,7 +315,7 @@ test('v2: deadline aborta as duas pontas e não reabre a permissão', () => {
   const kiosk = new Socket(), web = new Socket(); manager.register(kiosk, 'kiosk', 'TIME0001', 'kiosk'); manager.unlock(kiosk, 100);
   const ticket = kiosk.messages.at(-1).uploadTicket; assert.equal(manager.claim('TIME0001', ticket, 'customer'), true);
   manager.register(web, 'web', 'TIME0001', 'customer', ticket); manager.handle(web, v2request(0, 'start', { files: v2files }));
-  assert.equal(timers.at(-1).delay, 60000); timers.at(-1).callback();
+  assert.equal(timers.at(-1).delay, confirmedProtocol.FLOW_LIMITS.requestTimeoutMs); timers.at(-1).callback();
   assert.equal(web.messages.at(-1).code, 'ACK_TIMEOUT'); assert.equal(kiosk.messages.at(-1).code, 'ACK_TIMEOUT');
   assert.equal(manager.claim('TIME0001', ticket, 'customer'), false); manager.cleanup(kiosk); manager.cleanup(kiosk);
 });

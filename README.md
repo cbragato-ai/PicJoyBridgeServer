@@ -24,6 +24,8 @@ Existe um único registro por socket. Erros de conexão ou de `send()` removem e
 
 O fluxo usa `upload-request` (`transferId`, `requestId`, `operation`) e `upload-ack`, emitido pelo Kiosk exato. `start` contém manifesto com até 100 `fileId` distintos, nomes, MIME e bytes. `chunk` leva `fileId`, `seq`, Base64 e SHA-256; `file-complete` confirma a foto; `finish` só recebe ACK após processamento do lote. Fotos homônimas são permitidas. Um ACK do web ou de outra sessão não avança o envio.
 
+Para medição visual opcional, o Kiosk inclui `showTransferTimer: true` no `unlock`. O Bridge entrega esse sinal ao uploader em `registered`; o Kiosk e o uploader exibem o tempo decorrido até o ACK de `finish`. A ausência do campo mantém o cronômetro oculto e é compatível com clientes antigos.
+
 - Um pedido por vez, até 128 KiB de JSON por sessão; blocos de até 48 KiB binários/64 KiB Base64.
 - Até 32 transferências ativas, reservando 128 KiB por transferência em um orçamento global de 4 MiB. O Bridge guarda contadores, manifesto e hashes de requisições; não retém payload para reenvio.
 - Repetição idêntica pendente não é encaminhada de novo. Repetição idêntica do último pedido confirmado devolve o ACK guardado. Alteração de conteúdo ou sequência inválida aborta. Não existe retomada após reconectar: reiniciar junto ao totem com novo QR.

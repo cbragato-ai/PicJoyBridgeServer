@@ -84,7 +84,7 @@ export function handleMessage(ws: WebSocket, message: any) {
         if (owner?.type !== "kiosk" || owner.sessionId !== sessionId) {
           rejectUpload(ws, "INVALID_SESSION", "Somente o totem pode liberar sua sessão."); return;
         }
-        if (owner.protocolVersion === CONFIRMED_PROTOCOL) confirmed.unlock(ws, message.maxFiles);
+        if (owner.protocolVersion === CONFIRMED_PROTOCOL) confirmed.unlock(ws, message.maxFiles, message.showTransferTimer);
         console.log("Unlock Kiosk Session", sessionId);
         sessionLocks.set(sessionId, "");
         datasource.getSessionByCode(sessionId, (err, row) => {
@@ -172,7 +172,8 @@ export function handleMessage(ws: WebSocket, message: any) {
         send(ws, { type: "registered", role: info.type, sessionId,
           ...([UPLOAD_PROTOCOL_VERSION, CONFIRMED_PROTOCOL].includes(message.protocolVersion)
             ? { protocolVersion: message.protocolVersion, uploadLimits: message.protocolVersion === CONFIRMED_PROTOCOL ? { ...UPLOAD_LIMITS, maxFiles: confirmed.capacity(ws) } : UPLOAD_LIMITS,
-                ...(message.protocolVersion === CONFIRMED_PROTOCOL ? { flowLimits: confirmed.flowLimits(ws), printCapacity: { maxFiles: confirmed.capacity(ws) } } : {}) } : {}),
+                ...(message.protocolVersion === CONFIRMED_PROTOCOL ? { flowLimits: confirmed.flowLimits(ws),
+                  showTransferTimer: confirmed.showTransferTimer(ws), printCapacity: { maxFiles: confirmed.capacity(ws) } } : {}) } : {}),
         });
 
         if (info.type === "kiosk" && info.sessionId) {

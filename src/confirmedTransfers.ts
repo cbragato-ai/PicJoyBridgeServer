@@ -4,8 +4,9 @@ import { CONFIRMED_PROTOCOL, FLOW_LIMITS, ConfirmedManifest, UploadRequest, Uplo
 
 type Peer = { ws: WebSocket; role: "web" | "kiosk"; sessionId: string; id: string; ticket?: string; maxFiles?: number; canPipeline?: boolean; completed?: { ack: UploadAck; fingerprint: string } };
 type Permission = { ticket: string; kiosk: WebSocket; expiresAt: number; customerId?: string; used: boolean; maxFiles: number;
-  transferWindowBytes: number; maxInFlightRequests: number; revoked?: boolean };
+  transferWindowBytes: number; maxInFlightRequests: number; showTransferTimer: boolean; revoked?: boolean };
 type Transfer = { id: string; web: Peer; kiosk: Peer; manifest: ConfirmedManifest; next: number;
+  transferWindowBytes: number; maxInFlightRequests: number;
   pending: Map<number, { fingerprint: string; operation: string; bytes: number }>;
   recent: Map<number, { ack: UploadAck; fingerprint: string }>;
   startedAt: number; timer?: ReturnType<typeof setTimeout> };
@@ -28,6 +29,9 @@ export class ConfirmedTransfers {
     const permission = this.permissions.get(this.peers.get(ws)?.sessionId ?? "");
     return { ...FLOW_LIMITS, transferWindowBytes: permission?.transferWindowBytes ?? FLOW_LIMITS.frameBytes,
       maxInFlightRequests: permission?.maxInFlightRequests ?? 1 };
+  }
+  showTransferTimer(ws: WebSocket) {
+    return this.permissions.get(this.peers.get(ws)?.sessionId ?? "")?.showTransferTimer === true;
   }
   hasKiosk(session: string) { return [...this.peers.values()].some(p => p.role === "kiosk" && p.sessionId === session); }
   claim(session: string, ticket: unknown, customer: string): boolean {
@@ -55,7 +59,7 @@ export class ConfirmedTransfers {
     this.peers.set(ws, { ws, role, sessionId, id, ...(role === "kiosk" ? { canPipeline } : {}),
       ...(role === "web" ? { ticket: ticket as string, maxFiles: this.permissions.get(sessionId)!.maxFiles } : {}) });
   }
-  unlock(ws: WebSocket, maxFiles: unknown = 0) {
+  unlock(ws: WebSocket, maxFiles: unknown = 0, showTransferTimer: unknown = false) {
     const peer = this.peers.get(ws);
     requireUpload(peer?.role === "kiosk", "Somente o totem pode abrir uma nova transferência.");
     this.abort(peer.sessionId, "SESSION_RESET", "O totem reiniciou a sessão.");
@@ -69,6 +73,7 @@ export class ConfirmedTransfers {
     const permission = { maxFiles: capacity,
       transferWindowBytes: peer.canPipeline ? FLOW_LIMITS.transferWindowBytes : FLOW_LIMITS.frameBytes,
       maxInFlightRequests: peer.canPipeline ? FLOW_LIMITS.maxInFlightRequests : 1,
+      showTransferTimer: showTransferTimer === true,
       ticket: randomBytes(32).toString("hex"), kiosk: ws,
       expiresAt: Date.now() + FLOW_LIMITS.permissionTimeoutMs, used: false };
     this.permissions.set(peer.sessionId, permission);
@@ -134,6 +139,7 @@ export class ConfirmedTransfers {
           requireUpload(this.transfers.size < FLOW_LIMITS.maxTransfers &&
             (this.transfers.size + 1) * FLOW_LIMITS.frameBytes <= FLOW_LIMITS.globalWindowBytes, "Capacidade de envios atingida. Tente novamente junto ao totem.");
           transfer = { id: request.transferId, web: peer, kiosk, manifest: new ConfirmedManifest(request.files, peer.maxFiles ?? 0),
+            transferWindowBytes: permission.transferWindowBytes, maxInFlightRequests: permission.maxInFlightRequests,
             next: 0, pending: new Map(), recent: new Map(), startedAt: Date.now() };
           this.transfers.set(peer.sessionId, transfer);
         }
@@ -149,11 +155,11 @@ export class ConfirmedTransfers {
         }
         requireUpload(request.requestId === transfer.next, "Sequência de requisição inválida.");
         const currentBytes = [...transfer.pending.values()].reduce((sum, item) => sum + item.bytes, 0);
-        requireUpload(transfer.pending.size < FLOW_LIMITS.maxInFlightRequests && currentBytes + requestBytes <= FLOW_LIMITS.transferWindowBytes,
+        requireUpload(transfer.pending.size < transfer.maxInFlightRequests && currentBytes + requestBytes <= transfer.transferWindowBytes,
           "Janela de transferência excedida.");
         if (request.requestId > 0) transfer.manifest.accept(request);
         else requireUpload(request.operation === "start", "Manifesto inválido.");
-        requireUpload(transfer.kiosk.ws.bufferedAmount + requestBytes <= FLOW_LIMITS.transferWindowBytes, "O orçamento de saída da sessão foi excedido.");
+        requireUpload(transfer.kiosk.ws.bufferedAmount + requestBytes <= transfer.transferWindowBytes, "O orçamento de saída da sessão foi excedido.");
         transfer.pending.set(request.requestId, { fingerprint, operation: request.operation, bytes: requestBytes });
         transfer.next++;
         this.peakInFlightBytes = Math.max(this.peakInFlightBytes, this.snapshot().inFlightBytes);
